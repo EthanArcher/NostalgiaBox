@@ -9,9 +9,9 @@
 #define LCD_WIDTH     EXAMPLE_LCD_WIDTH
 #define LCD_HEIGHT    EXAMPLE_LCD_HEIGHT
 
-// Partial render buffer: 1/10 of the screen, double-buffered. Small enough for
-// internal SRAM, big enough to keep the face animation smooth.
-#define LVGL_BUF_LEN  (LCD_WIDTH * LCD_HEIGHT / 10)
+// Partial render buffer: 1/6 of the screen, double-buffered. Bigger buffer =
+// fewer flushes per frame = smoother animation, while still fitting SRAM.
+#define LVGL_BUF_LEN  (LCD_WIDTH * LCD_HEIGHT / 6)
 
 #define EXAMPLE_LVGL_TICK_PERIOD_MS  10
 

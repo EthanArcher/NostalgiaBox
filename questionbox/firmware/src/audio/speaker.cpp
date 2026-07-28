@@ -56,6 +56,28 @@ static int read_exact(Stream &s, uint8_t *buf, int want, void (*pump)())
   return got;
 }
 
+void Speaker_TestBeep()
+{
+  const int rate = 24000;
+  const int total = rate / 2;        // 0.5 seconds
+  int16_t buf[256 * 2];
+  int done = 0;
+  while (done < total) {
+    int cnt = (total - done) < 256 ? (total - done) : 256;
+    for (int i = 0; i < cnt; i++) {
+      float t = (float)(done + i) / rate;
+      float env = sinf(3.14159265f * (done + i) / total);   // gentle fade in/out
+      float s = sinf(2.0f * 3.14159265f * 700.0f * t) * 0.35f * env;
+      int16_t v = (int16_t)(s * 32767);
+      buf[i * 2] = v;
+      buf[i * 2 + 1] = v;
+    }
+    AudioBus_SpeakerWrite(buf, cnt * 2 * sizeof(int16_t));   // raw, ignores volume
+    done += cnt;
+  }
+  Serial.println("[spk] test beep played");
+}
+
 void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
 {
   uint8_t header[44];

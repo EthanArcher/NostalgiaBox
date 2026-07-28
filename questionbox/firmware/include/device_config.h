@@ -25,6 +25,11 @@
 #define DEVICE_TOKEN ""
 #endif
 
+// Optional: only needed if you keep Vercel Deployment Protection ON.
+#ifndef VERCEL_BYPASS_SECRET
+#define VERCEL_BYPASS_SECRET ""
+#endif
+
 // True only when the essential fields have been filled in.
 static inline bool DeviceConfigValid()
 {

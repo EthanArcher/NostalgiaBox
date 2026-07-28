@@ -81,12 +81,24 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
   s_http.addHeader("Content-Type", "audio/wav");
   s_http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
 
+  // Optional: bypass Vercel Deployment Protection without disabling it.
+  if (sizeof(VERCEL_BYPASS_SECRET) > 1) {
+    s_http.addHeader("x-vercel-protection-bypass", VERCEL_BYPASS_SECRET);
+    s_http.addHeader("x-vercel-set-bypass-cookie", "true");
+  }
+
   static const char *collect[] = {"X-Answer-Text", "X-Answer-Mode", "X-Is-Spelling", "X-Spell-Word"};
   s_http.collectHeaders(collect, 4);
 
   Serial.printf("[net] POST %s (%u bytes)\n", url.c_str(), (unsigned)len);
   int code = s_http.POST((uint8_t *)wav, len);
   Serial.printf("[net] status %d\n", code);
+
+  if (code >= 300 && code < 400) {
+    Serial.println("[net] server redirected (3xx). This is almost always Vercel");
+    Serial.println("[net] Deployment Protection. Fix: turn it OFF (or 'Only Preview')");
+    Serial.println("[net] and use your PRODUCTION vercel.app URL in secrets.h.");
+  }
 
   if (code == 200) {
     out.text = urlDecode(s_http.header("X-Answer-Text"));

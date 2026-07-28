@@ -25,8 +25,10 @@ mic never listens on its own. **Audio is recorded, sent, and discarded — never
 stored** on the device.
 
 **How you interact:**
-- **Tap the face** to start listening (it grins big and shows ripples). Tap
-  again — or just stop talking — to send. There's no separate button.
+- **Tap the face** to start listening (it grins big and a soft, flowing light
+  sweeps around the edge, Siri-style). Tap again — or just stop talking — to
+  send. There's no separate button. The face also gently looks around and blinks
+  so it feels alive.
 - **Auto-sleep:** after 30 seconds of no use, the screen goes dark. **Tap to
   wake** it (that first tap only wakes; tap again to ask).
 - **Volume:** the two **physical buttons on the side** control the speaker

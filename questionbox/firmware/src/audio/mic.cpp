@@ -1,26 +1,20 @@
 #include "mic.h"
+#include "audio_bus.h"
 #include <Arduino.h>
-#include <ESP_I2S.h>
 #include <esp_heap_caps.h>
+#include <math.h>
 
-// ---- Microphone I2S pins (Waveshare wiki) ----
-#define MIC_BCK   15
-#define MIC_WS     2
-#define MIC_DIN   39
-
-#define REC_RATE        16000        // 16 kHz is plenty for speech-to-text
+#define REC_RATE        16000
 #define REC_MAX_SEC     10
-#define REC_MAX_SAMPLES (REC_RATE * REC_MAX_SEC)   // mono samples
+#define REC_MAX_SAMPLES (REC_RATE * REC_MAX_SEC)
 #define WAV_HEADER_LEN  44
 
-// Auto-stop tuning.
-#define SILENCE_RMS      700         // below this counts as "quiet"
-#define SILENCE_MS       1200        // stop this long after speech ends
-#define MIN_RECORD_MS    400         // don't auto-stop before this
+#define SILENCE_RMS      700
+#define SILENCE_MS       1200
+#define MIN_RECORD_MS    400
 
-static I2SClass s_i2s;
 static uint8_t *s_buf = nullptr;     // [WAV header | mono int16 PCM]
-static size_t   s_count = 0;         // mono samples captured
+static size_t   s_count = 0;
 static bool     s_recording = false;
 
 static bool     s_speech = false;
@@ -44,7 +38,7 @@ static void write_wav_header(uint8_t *h, uint32_t dataLen, uint32_t rate)
   memcpy(h + 8, "WAVE", 4);
   memcpy(h + 12, "fmt ", 4);
   *(uint32_t *)(h + 16) = 16;
-  *(uint16_t *)(h + 20) = 1;          // PCM
+  *(uint16_t *)(h + 20) = 1;
   *(uint16_t *)(h + 22) = channels;
   *(uint32_t *)(h + 24) = rate;
   *(uint32_t *)(h + 28) = byteRate;
@@ -56,30 +50,23 @@ static void write_wav_header(uint8_t *h, uint32_t dataLen, uint32_t rate)
 
 bool Mic_Begin()
 {
+  // Only allocate the record buffer here. The I2S bus is enabled on demand in
+  // Mic_Start() (shared with the speaker), so nothing fights over the hardware.
   s_buf = (uint8_t *)heap_caps_malloc(WAV_HEADER_LEN + REC_MAX_SAMPLES * 2, MALLOC_CAP_SPIRAM);
   if (!s_buf) {
     Serial.println("[mic] FAILED to allocate PSRAM record buffer");
     return false;
   }
-  // Capture in STEREO and sum the two slots when downmixing: this makes us
-  // robust to whether the MEMS mic sits on the left or right I2S slot.
-  s_i2s.setPins(MIC_BCK, MIC_WS, -1 /*dout*/, MIC_DIN, -1 /*mclk*/);
-  if (!s_i2s.begin(I2S_MODE_STD, REC_RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) {
-    Serial.println("[mic] i2s begin FAILED");
-    return false;
-  }
-  Serial.println("[mic] ready");
+  Serial.println("[mic] buffer ready");
   return true;
 }
 
 void Mic_Start()
 {
-  // Drop any stale samples sitting in the DMA buffer.
-  uint8_t scratch[512];
-  while (s_i2s.available() > 0) {
-    int n = s_i2s.available();
-    if (n > (int)sizeof(scratch)) n = sizeof(scratch);
-    if (s_i2s.readBytes((char *)scratch, n) <= 0) break;
+  if (!AudioBus_BeginMic()) {
+    Serial.println("[mic] could not enable mic bus");
+    s_recording = false;
+    return;
   }
   s_count = 0;
   s_recording = true;
@@ -93,6 +80,7 @@ void Mic_Stop()
 {
   if (!s_recording) return;
   s_recording = false;
+  AudioBus_End();
   Serial.printf("[mic] recording stopped (%u samples, %.2fs)\n",
                 (unsigned)s_count, (float)s_count / REC_RATE);
 }
@@ -101,21 +89,20 @@ bool Mic_Poll()
 {
   if (!s_recording) return false;
 
-  // Read whatever is currently available (non-blocking), a chunk at a time.
-  uint8_t tmp[2048];                          // stereo int16 frames = 4 bytes each
-  int avail = s_i2s.available();
+  uint8_t tmp[2048];
+  int avail = wb_i2s.available();
   if (avail > 0) {
     int n = avail;
     if (n > (int)sizeof(tmp)) n = sizeof(tmp);
-    n &= ~0x3;                                 // whole stereo frames only
+    n &= ~0x3;
     if (n > 0) {
-      int got = s_i2s.readBytes((char *)tmp, n);
+      int got = wb_i2s.readBytes((char *)tmp, n);
       int frames = got / 4;
       int16_t *in = (int16_t *)tmp;
       int16_t *out = (int16_t *)(s_buf + WAV_HEADER_LEN);
       uint64_t energy = 0;
       for (int i = 0; i < frames && s_count < REC_MAX_SAMPLES; i++) {
-        int32_t mono = (int32_t)in[i * 2] + (int32_t)in[i * 2 + 1];  // L + R
+        int32_t mono = (int32_t)in[i * 2] + (int32_t)in[i * 2 + 1];
         int16_t m = clamp16(mono);
         out[s_count++] = m;
         energy += (uint64_t)((int32_t)m * m);

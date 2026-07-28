@@ -25,7 +25,9 @@ static bool init_mic(void)
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
     .sample_rate = 16000,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    // MEMS mic outputs 24-bit data; read 32-bit slots and scale down in mic.cpp.
+    // (Reading 16-bit grabbed the empty low bits -> pure silence.)
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,   // stereo frames (L,R)
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,

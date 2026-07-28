@@ -5,18 +5,17 @@
 #include <math.h>
 
 #define REC_RATE        16000
-#define REC_MAX_SEC     15                  // safety cap; normally you tap to stop
+#define REC_MAX_SEC     15
 #define REC_MAX_SAMPLES (REC_RATE * REC_MAX_SEC)
 #define WAV_HEADER_LEN  44
 
-static uint8_t *s_buf = nullptr;     // [WAV header | mono int16 PCM]
+static int32_t *s_cap = nullptr;     // captured mono, 32-bit (pre-normalization)
+static uint8_t *s_buf = nullptr;     // output WAV: [44-byte header | mono int16 PCM]
 static size_t   s_count = 0;
 static bool     s_recording = false;
 
-// Level metering (to see if the mic actually hears anything, and which channel).
-static uint64_t s_sumsq_l = 0, s_sumsq_r = 0;
-static uint32_t s_frames = 0;
-static int32_t  s_peak = 0;
+// Level metering.
+static int32_t  s_peakL = 0, s_peakR = 0, s_peakMono = 0;
 
 static inline int16_t clamp16(int32_t v)
 {
@@ -47,23 +46,22 @@ static void write_wav_header(uint8_t *h, uint32_t dataLen, uint32_t rate)
 
 bool Mic_Begin()
 {
+  s_cap = (int32_t *)heap_caps_malloc(REC_MAX_SAMPLES * sizeof(int32_t), MALLOC_CAP_SPIRAM);
   s_buf = (uint8_t *)heap_caps_malloc(WAV_HEADER_LEN + REC_MAX_SAMPLES * 2, MALLOC_CAP_SPIRAM);
-  if (!s_buf) {
-    Serial.println("[mic] FAILED to allocate PSRAM record buffer");
+  if (!s_cap || !s_buf) {
+    Serial.println("[mic] FAILED to allocate PSRAM buffers");
     return false;
   }
-  AudioBus_Init();          // mic + speaker channels are created once, here
+  AudioBus_Init();
   Serial.println("[mic] buffer ready");
   return true;
 }
 
 void Mic_Start()
 {
-  AudioBus_MicFlush();      // drop stale samples so we start clean
+  AudioBus_MicFlush();
   s_count = 0;
-  s_sumsq_l = s_sumsq_r = 0;
-  s_frames = 0;
-  s_peak = 0;
+  s_peakL = s_peakR = s_peakMono = 0;
   s_recording = true;
   Serial.println("[mic] recording started");
 }
@@ -72,38 +70,33 @@ void Mic_Stop()
 {
   if (!s_recording) return;
   s_recording = false;
-  uint32_t rmsL = s_frames ? (uint32_t)sqrt((double)s_sumsq_l / s_frames) : 0;
-  uint32_t rmsR = s_frames ? (uint32_t)sqrt((double)s_sumsq_r / s_frames) : 0;
-  Serial.printf("[mic] stopped: %u samples %.2fs | peak=%d rmsL=%u rmsR=%u\n",
-                (unsigned)s_count, (float)s_count / REC_RATE,
-                (int)s_peak, (unsigned)rmsL, (unsigned)rmsR);
+  Serial.printf("[mic] stopped: %u samples %.2fs | peakL=%d peakR=%d (32-bit)\n",
+                (unsigned)s_count, (float)s_count / REC_RATE, (int)s_peakL, (int)s_peakR);
 }
 
 bool Mic_Poll()
 {
   if (!s_recording) return false;
 
-  uint8_t tmp[2048];
+  uint8_t tmp[2048];                       // 32-bit stereo frames = 8 bytes each
   size_t got = AudioBus_MicRead(tmp, sizeof(tmp));
-  if (got >= 4) {
-    int frames = got / 4;
-    int16_t *in = (int16_t *)tmp;
-    int16_t *out = (int16_t *)(s_buf + WAV_HEADER_LEN);
+  if (got >= 8) {
+    int frames = got / 8;
+    int32_t *in = (int32_t *)tmp;
     for (int i = 0; i < frames && s_count < REC_MAX_SAMPLES; i++) {
-      int16_t L = in[i * 2];
-      int16_t R = in[i * 2 + 1];
-      s_sumsq_l += (uint64_t)((int32_t)L * L);
-      s_sumsq_r += (uint64_t)((int32_t)R * R);
-      s_frames++;
-      int32_t mono = ((int32_t)L + (int32_t)R) / 2;
-      int16_t m = clamp16(mono);
-      int32_t a = m < 0 ? -m : m;
-      if (a > s_peak) s_peak = a;
-      out[s_count++] = m;
+      int32_t L = in[i * 2];
+      int32_t R = in[i * 2 + 1];
+      int32_t aL = L < 0 ? -L : L;
+      int32_t aR = R < 0 ? -R : R;
+      if (aL > s_peakL) s_peakL = aL;
+      if (aR > s_peakR) s_peakR = aR;
+      int32_t mono = (L >> 1) + (R >> 1);    // combine channels without overflow
+      int32_t am = mono < 0 ? -mono : mono;
+      if (am > s_peakMono) s_peakMono = am;
+      s_cap[s_count++] = mono;
     }
   }
 
-  // Stop only when the child taps again (handled in main) or the safety cap hits.
   if (s_count >= REC_MAX_SAMPLES) {
     Mic_Stop();
     return false;
@@ -113,21 +106,22 @@ bool Mic_Poll()
 
 bool Mic_GetWav(const uint8_t **data, size_t *len)
 {
-  if (!s_buf || s_count == 0) return false;
+  if (!s_buf || !s_cap || s_count == 0) return false;
 
-  // Auto-normalize: MEMS mics are quiet, so boost the recording so the loudest
-  // peak sits around half-scale. This keeps speech well above the noise floor
-  // for transcription. Only boosts (never attenuates), capped to avoid blowing
-  // up pure noise.
   int16_t *pcm = (int16_t *)(s_buf + WAV_HEADER_LEN);
-  if (s_peak > 0 && s_peak < 16000) {
-    float gain = 16000.0f / (float)s_peak;
-    if (gain > 40.0f) gain = 40.0f;
+
+  if (s_peakMono <= 0) {
+    Serial.println("[mic] SILENT - mic produced no signal (check mic hardware/pins)");
+    memset(pcm, 0, s_count * 2);
+  } else {
+    // Normalize whatever level the mic gave us up to a healthy 16-bit target,
+    // so transcription gets clear speech regardless of the mic's raw scale.
+    const int32_t target = 22000;
     for (size_t i = 0; i < s_count; i++) {
-      int32_t v = (int32_t)(pcm[i] * gain);
-      pcm[i] = clamp16(v);
+      int64_t v = (int64_t)s_cap[i] * target / s_peakMono;
+      pcm[i] = clamp16((int32_t)v);
     }
-    Serial.printf("[mic] normalized x%.1f (peak %d -> ~16000)\n", gain, (int)s_peak);
+    Serial.printf("[mic] normalized (peakMono=%d -> %d)\n", (int)s_peakMono, (int)target);
   }
 
   uint32_t dataLen = s_count * 2;

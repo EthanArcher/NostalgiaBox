@@ -10,6 +10,27 @@
 
 static I2SClass s_i2s;
 
+// Software gain applied before the samples reach the DAC. 1.0 = original level.
+// A gentle boost helps if the answer sounds quiet even with the amp turned up.
+static float s_gain = 1.6f;
+
+void Speaker_SetGain(float g)
+{
+  if (g < 0.0f) g = 0.0f;
+  if (g > 4.0f) g = 4.0f;
+  s_gain = g;
+}
+float Speaker_GetGain() { return s_gain; }
+
+static inline int16_t apply_gain(int16_t sample)
+{
+  if (s_gain == 1.0f) return sample;
+  int32_t v = (int32_t)(sample * s_gain);
+  if (v > 32767) v = 32767;
+  if (v < -32768) v = -32768;
+  return (int16_t)v;
+}
+
 bool Speaker_Begin()
 {
   s_i2s.setPins(SPK_BCK, SPK_WS, SPK_DOUT, -1 /*din*/, -1 /*mclk*/);
@@ -69,8 +90,9 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
 
     int samples = got / 2;
     for (int i = 0; i < samples; i++) {
-      stereo[i * 2] = mono[i];
-      stereo[i * 2 + 1] = mono[i];
+      int16_t s = apply_gain(mono[i]);
+      stereo[i * 2] = s;
+      stereo[i * 2 + 1] = s;
     }
     s_i2s.write((uint8_t *)stereo, samples * 2 * sizeof(int16_t));
 

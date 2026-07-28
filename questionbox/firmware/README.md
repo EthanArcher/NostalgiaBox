@@ -24,6 +24,15 @@ SPEAKING / SPELLING), designed for the round screen. Push-to-talk only — the
 mic never listens on its own. **Audio is recorded, sent, and discarded — never
 stored** on the device.
 
+**How you interact:**
+- **Tap the face** to start listening (it grins big and shows ripples). Tap
+  again — or just stop talking — to send. There's no separate button.
+- **Auto-sleep:** after 30 seconds of no use, the screen goes dark. **Tap to
+  wake** it (that first tap only wakes; tap again to ask).
+- **Volume:** the two **physical buttons on the side** control the speaker
+  amplifier directly (press to change loudness). There's also a software boost
+  in `src/audio/speaker.cpp` (`Speaker_SetGain`) if it's still too quiet.
+
 > **Stage 4 update:** the server now runs the real (multi-second) STT → safety →
 > LLM → TTS pipeline, so the device sends the request on a **background task**.
 > The **THINKING** dots keep bouncing during the wait, and the **SPEAKING**

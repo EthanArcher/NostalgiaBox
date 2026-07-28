@@ -1,15 +1,18 @@
 /*****************************************************************************
  * The WonderBox face.
  *
- * A friendly, warm, slightly playful face designed for the 360x360 round LCD.
- * Everything is drawn with plain LVGL objects (no image assets) and animated
- * procedurally from Face_Tick(), driven by lv_tick_get(). One look per state:
+ * A warm, friendly, smiling face for the 360x360 round LCD. Everything is drawn
+ * with plain LVGL objects (no image assets). One look per state:
  *
- *   IDLE      gentle blinking, soft smile  -> ready and calm
- *   LISTENING wide eyes + a pulsing ring   -> "I'm listening"
- *   THINKING  eyes look up, bouncing dots  -> charming wait, not a spinner
- *   SPEAKING  mouth opens and closes       -> talking
- *   SPELLING  one big letter at a time      -> spelling a word out loud
+ *   IDLE      gentle blink, soft SMILE       -> ready and calm
+ *   LISTENING big grin + expanding ripples   -> "I'm listening"
+ *   THINKING  eyes glance up, bouncing dots  -> a charming wait
+ *   SPEAKING  mouth opens and closes         -> talking
+ *   SPELLING  one big letter at a time        -> spelling a word
+ *
+ * The smile is a crescent: a dark mouth shape with a background-colored shape
+ * nudged over the top of it, leaving a smiling curve. Only the small, moving
+ * parts animate each frame (eyes, ripples, talking mouth), so it stays fluid.
  *****************************************************************************/
 #include "face.h"
 #include <Arduino.h>
@@ -17,33 +20,32 @@
 #include <string.h>
 #include <ctype.h>
 
-// ---- Warm, friendly palette ------------------------------------------------
-#define COL_BG      0xFFF3E0  // warm cream background
-#define COL_INK     0x3A3F58  // soft dark navy for eyes / mouth
-#define COL_CHEEK   0xFFB4A2  // soft coral cheeks
-#define COL_ACCENT  0xFF7A59  // coral: listening ring / active bits
-#define COL_DOT     0x6FA8FF  // friendly blue thinking dots
-#define COL_LETTER  0x2E7DE1  // clear blue spelling letters
+// ---- Warm, friendly palette ----
+#define COL_BG      0xFFF3E0
+#define COL_INK     0x3A3F58
+#define COL_CHEEK   0xFFB4A2
+#define COL_ACCENT  0xFF7A59
+#define COL_DOT     0x6FA8FF
+#define COL_LETTER  0x2E7DE1
 
-// ---- Base geometry (screen is 360x360, center 180,180) ---------------------
-static const int EYE_D     = 66;   // eye diameter when fully open
-static const int EYE_DX    = 62;   // horizontal distance of each eye from center
-static const int EYE_DY    = -30;  // eyes sit above center
-static const int MOUTH_DY  = 60;   // mouth sits below center
+// ---- Base geometry (center 180,180) ----
+static const int EYE_D    = 66;
+static const int EYE_DX   = 62;
+static const int EYE_DY   = -34;
+static const int MOUTH_DY = 46;
 
-// ---- Objects ---------------------------------------------------------------
+// ---- Objects ----
 static lv_obj_t *eye_l, *eye_r;
 static lv_obj_t *cheek_l, *cheek_r;
-static lv_obj_t *mouth;
-static lv_obj_t *ring;
-static lv_obj_t *dots[3];
-static lv_obj_t *letter_lbl;
-static lv_obj_t *word_lbl;
+static lv_obj_t *mouth;       // dark mouth shape (smile base, and the talking mouth)
+static lv_obj_t *smile_mask;  // background-colored shape that carves the smile curve
+static lv_obj_t *ripples[3];  // expanding "listening" waves
+static lv_obj_t *dots[3];     // thinking
+static lv_obj_t *letter_lbl, *word_lbl;
 
-// ---- Animation state -------------------------------------------------------
 static WbState current = WB_IDLE;
-static uint32_t blink_next_ms = 0;   // when the next blink starts
-static uint32_t blink_start_ms = 0;  // when the current blink started (0 = not blinking)
+static uint32_t blink_next_ms = 0;
+static uint32_t blink_start_ms = 0;
 static const uint32_t BLINK_MS = 150;
 
 static char spell_word[32] = {0};
@@ -52,30 +54,39 @@ static int  spell_index = 0;
 static uint32_t spell_last_ms = 0;
 static const uint32_t SPELL_STEP_MS = 800;
 
-// ---------------------------------------------------------------------------
 static lv_obj_t *make_blob(lv_obj_t *parent, uint32_t color, lv_opa_t opa)
 {
   lv_obj_t *o = lv_obj_create(parent);
   lv_obj_remove_style_all(o);
   lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
   lv_obj_set_style_bg_opa(o, opa, 0);
   return o;
 }
 
-static inline void show(lv_obj_t *o, bool visible)
+static inline void show(lv_obj_t *o, bool v)
 {
-  if (visible) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
-  else         lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+  if (v) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+  else   lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void schedule_blink(uint32_t now)
 {
-  blink_next_ms = now + 2400 + (esp_random() % 2600);  // 2.4s - 5.0s
+  blink_next_ms = now + 2400 + (esp_random() % 2600);
 }
 
-// ---------------------------------------------------------------------------
+// Configure the crescent smile. `grin` = how big/open the smile is (pixels the
+// mask is lifted above the mouth). Bigger grin = bigger smile.
+static void set_smile(int width, int grin)
+{
+  lv_obj_set_size(mouth, width, 66);
+  lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
+  lv_obj_set_size(smile_mask, width + 24, 66);
+  lv_obj_align(smile_mask, LV_ALIGN_CENTER, 0, MOUTH_DY - grin);
+}
+
 void Face_Create(void)
 {
   lv_obj_t *scr = lv_scr_act();
@@ -83,35 +94,35 @@ void Face_Create(void)
   lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-  // Listening ring (drawn first so it sits behind the face).
-  ring = lv_obj_create(scr);
-  lv_obj_remove_style_all(ring);
-  lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_size(ring, 320, 320);
-  lv_obj_center(ring);
-  lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_color(ring, lv_color_hex(COL_ACCENT), 0);
-  lv_obj_set_style_border_width(ring, 10, 0);
-  lv_obj_set_style_border_opa(ring, LV_OPA_60, 0);
+  // Ripples first (behind everything).
+  for (int i = 0; i < 3; i++) {
+    ripples[i] = lv_obj_create(scr);
+    lv_obj_remove_style_all(ripples[i]);
+    lv_obj_clear_flag(ripples[i], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(ripples[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_radius(ripples[i], LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(ripples[i], LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(ripples[i], lv_color_hex(COL_ACCENT), 0);
+    lv_obj_set_style_border_width(ripples[i], 6, 0);
+    lv_obj_set_style_border_opa(ripples[i], LV_OPA_TRANSP, 0);
+  }
 
   cheek_l = make_blob(scr, COL_CHEEK, LV_OPA_50);
   cheek_r = make_blob(scr, COL_CHEEK, LV_OPA_50);
   lv_obj_set_size(cheek_l, 34, 34);
   lv_obj_set_size(cheek_r, 34, 34);
-  lv_obj_align(cheek_l, LV_ALIGN_CENTER, -96, 18);
-  lv_obj_align(cheek_r, LV_ALIGN_CENTER,  96, 18);
+  lv_obj_align(cheek_l, LV_ALIGN_CENTER, -96, 12);
+  lv_obj_align(cheek_r, LV_ALIGN_CENTER, 96, 12);
 
   eye_l = make_blob(scr, COL_INK, LV_OPA_COVER);
   eye_r = make_blob(scr, COL_INK, LV_OPA_COVER);
   lv_obj_set_size(eye_l, EYE_D, EYE_D);
   lv_obj_set_size(eye_r, EYE_D, EYE_D);
   lv_obj_align(eye_l, LV_ALIGN_CENTER, -EYE_DX, EYE_DY);
-  lv_obj_align(eye_r, LV_ALIGN_CENTER,  EYE_DX, EYE_DY);
+  lv_obj_align(eye_r, LV_ALIGN_CENTER, EYE_DX, EYE_DY);
 
   mouth = make_blob(scr, COL_INK, LV_OPA_COVER);
-  lv_obj_set_size(mouth, 96, 30);
-  lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
+  smile_mask = make_blob(scr, COL_BG, LV_OPA_COVER); // same as background -> carves a smile
 
   for (int i = 0; i < 3; i++) {
     dots[i] = make_blob(scr, COL_DOT, LV_OPA_COVER);
@@ -119,7 +130,6 @@ void Face_Create(void)
     lv_obj_align(dots[i], LV_ALIGN_CENTER, (i - 1) * 34, 40);
   }
 
-  // Big spelling letter + soft full-word caption.
   letter_lbl = lv_label_create(scr);
   lv_obj_set_style_text_color(letter_lbl, lv_color_hex(COL_LETTER), 0);
   lv_obj_set_style_text_font(letter_lbl, &lv_font_montserrat_48, 0);
@@ -136,7 +146,6 @@ void Face_Create(void)
   Face_SetState(WB_IDLE);
 }
 
-// ---------------------------------------------------------------------------
 WbState Face_GetState(void) { return current; }
 
 void Face_SetState(WbState state)
@@ -146,19 +155,31 @@ void Face_SetState(WbState state)
 
   const bool is_face  = (state != WB_SPELLING);
   const bool is_think = (state == WB_THINKING);
+  const bool is_spk   = (state == WB_SPEAKING);
+  const bool is_listen = (state == WB_LISTENING);
   const bool is_spell = (state == WB_SPELLING);
 
-  show(eye_l,  is_face);
-  show(eye_r,  is_face);
+  show(eye_l, is_face);
+  show(eye_r, is_face);
   show(cheek_l, is_face);
   show(cheek_r, is_face);
-  show(mouth,  is_face && !is_think);        // dots replace the mouth while thinking
-  show(ring,   state == WB_LISTENING);
+  // Mouth shows for idle/listening (as a smile) and speaking (as an open mouth).
+  show(mouth, is_face && !is_think);
+  // The mask is only shown to carve the smile (idle/listening), not while talking.
+  show(smile_mask, (state == WB_IDLE || is_listen));
   for (int i = 0; i < 3; i++) show(dots[i], is_think);
+  for (int i = 0; i < 3; i++) show(ripples[i], is_listen);
   show(letter_lbl, is_spell);
-  show(word_lbl,   is_spell);
+  show(word_lbl, is_spell);
 
-  // Reset per-state timing so animations start cleanly.
+  // Static smile geometry (set once per state so it isn't redrawn every frame).
+  if (state == WB_IDLE) set_smile(110, 30);       // soft, friendly smile
+  else if (is_listen)   set_smile(124, 46);       // big, happy grin
+  else if (is_spk) {                              // speaking: reset mouth position
+    lv_obj_set_size(mouth, 84, 26);
+    lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
+  }
+
   uint32_t now = lv_tick_get();
   blink_start_ms = 0;
   schedule_blink(now);
@@ -182,8 +203,7 @@ void Face_ShowSpelling(const char *word)
   spell_last_ms = lv_tick_get();
 }
 
-// ---- helpers used by Face_Tick --------------------------------------------
-static void set_eye_open(float open)  // open: 0 (closed) .. 1 (wide)
+static void set_eye_open(float open)
 {
   int h = (int)(6 + (EYE_D - 6) * open);
   if (h < 6) h = 6;
@@ -191,59 +211,58 @@ static void set_eye_open(float open)  // open: 0 (closed) .. 1 (wide)
   lv_obj_set_height(eye_r, h);
 }
 
-static void set_eye_look(int dy)  // vertical gaze offset
+static void set_eye_look(int dy)
 {
   lv_obj_align(eye_l, LV_ALIGN_CENTER, -EYE_DX, EYE_DY + dy);
-  lv_obj_align(eye_r, LV_ALIGN_CENTER,  EYE_DX, EYE_DY + dy);
+  lv_obj_align(eye_r, LV_ALIGN_CENTER, EYE_DX, EYE_DY + dy);
 }
 
-// Returns eye "open" factor accounting for the occasional blink.
 static float blink_factor(uint32_t now)
 {
   if (blink_start_ms == 0 && now >= blink_next_ms) blink_start_ms = now;
   if (blink_start_ms != 0) {
     uint32_t t = now - blink_start_ms;
-    if (t >= BLINK_MS) {           // blink finished
+    if (t >= BLINK_MS) {
       blink_start_ms = 0;
       schedule_blink(now);
       return 1.0f;
     }
-    float p = (float)t / BLINK_MS; // 0..1 across the blink
-    float closed = 1.0f - fabsf(1.0f - 2.0f * p);  // 0->1->0 triangle
-    return 1.0f - closed;          // open->closed->open
+    float p = (float)t / BLINK_MS;
+    float closed = 1.0f - fabsf(1.0f - 2.0f * p);
+    return 1.0f - closed;
   }
   return 1.0f;
 }
 
-// ---------------------------------------------------------------------------
 void Face_Tick(void)
 {
   uint32_t now = lv_tick_get();
   float t = now / 1000.0f;
 
   switch (current) {
-    case WB_IDLE: {
+    case WB_IDLE:
       set_eye_look(0);
       set_eye_open(blink_factor(now));
-      lv_obj_set_size(mouth, 96, 30);      // wide gentle smile
       break;
-    }
+
     case WB_LISTENING: {
       set_eye_look(0);
-      set_eye_open(fminf(1.0f, blink_factor(now) * 1.12f));  // eyes a touch wider
-      lv_obj_set_size(mouth, 40, 30);       // small attentive mouth
-      // Pulse the ring: breathe its size and opacity.
-      float pulse = 0.5f + 0.5f * sinf(t * 3.2f);
-      int d = 300 + (int)(28 * pulse);
-      lv_obj_set_size(ring, d, d);
-      lv_obj_center(ring);
-      lv_obj_set_style_border_opa(ring, (lv_opa_t)(120 + 100 * pulse), 0);
+      set_eye_open(blink_factor(now));
+      // Expanding ripples out to the edge = "I'm listening" waves.
+      for (int i = 0; i < 3; i++) {
+        float p = fmodf(t * 0.8f - i * 0.34f, 1.0f);
+        if (p < 0) p += 1.0f;
+        int d = 210 + (int)(180 * p);
+        lv_obj_set_size(ripples[i], d, d);
+        lv_obj_center(ripples[i]);
+        lv_obj_set_style_border_opa(ripples[i], (lv_opa_t)((1.0f - p) * 170), 0);
+      }
       break;
     }
-    case WB_THINKING: {
-      set_eye_look(-10);                     // glance upward, pondering
+
+    case WB_THINKING:
+      set_eye_look(-10);
       set_eye_open(blink_factor(now));
-      // Three dots bounce in a wave.
       for (int i = 0; i < 3; i++) {
         float ph = t * 4.0f - i * 0.6f;
         float bob = sinf(ph);
@@ -252,18 +271,18 @@ void Face_Tick(void)
         lv_obj_set_style_bg_opa(dots[i], (lv_opa_t)(120 + 120 * (0.5f + 0.5f * bob)), 0);
       }
       break;
-    }
+
     case WB_SPEAKING: {
       set_eye_look(0);
       set_eye_open(blink_factor(now));
-      // Mouth opens and closes as if talking.
       float m = 0.5f + 0.5f * sinf(t * 11.0f);
-      int h = 16 + (int)(40 * m);
-      lv_obj_set_size(mouth, 72, h);
+      int h = 16 + (int)(42 * m);
+      lv_obj_set_size(mouth, 84, h);
       lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
       break;
     }
-    case WB_SPELLING: {
+
+    case WB_SPELLING:
       if (spell_len > 0 && now - spell_last_ms >= SPELL_STEP_MS) {
         spell_last_ms = now;
         spell_index = (spell_index + 1) % spell_len;
@@ -271,6 +290,5 @@ void Face_Tick(void)
         lv_label_set_text(letter_lbl, c);
       }
       break;
-    }
   }
 }

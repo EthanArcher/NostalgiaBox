@@ -44,6 +44,15 @@ static bool     g_asleep = false;
 static int      g_volume = 70;           // 0..100
 static uint32_t g_last_gesture_ms = 0;
 
+// ---- BOOT button (GPIO0) as a volume control ----
+// It's the only side button the chip can read (the other is hardware RESET, and
+// the slide switch is a hardware battery power switch). Short press = volume up,
+// long press = volume down.
+#define BTN_BOOT       0
+static bool     g_btn_down = false;
+static uint32_t g_btn_down_ms = 0;
+static bool     g_btn_long_fired = false;
+
 static void note_activity() { g_last_activity = millis(); }
 
 static void pump_ui()
@@ -141,6 +150,40 @@ static void tap_event_cb(lv_event_t *e)
   handle_tap();
 }
 
+static void change_volume(int delta)
+{
+  g_volume += delta;
+  if (g_volume < 0) g_volume = 0;
+  if (g_volume > 100) g_volume = 100;
+  Speaker_SetVolumePercent(g_volume);
+  Face_ShowVolume(g_volume);
+  note_activity();
+  Serial.printf("[app] volume %d%%\n", g_volume);
+}
+
+// Poll the BOOT button: short press = volume up, long press = volume down.
+static void poll_boot_button()
+{
+  bool down = digitalRead(BTN_BOOT) == LOW;
+  uint32_t now = millis();
+  if (down && !g_btn_down) {
+    g_btn_down = true;
+    g_btn_down_ms = now;
+    g_btn_long_fired = false;
+    if (g_asleep) wake_up();
+  } else if (down && g_btn_down) {
+    if (!g_btn_long_fired && (now - g_btn_down_ms) > 700) {
+      g_btn_long_fired = true;
+      change_volume(-10);            // long press -> down
+    }
+  } else if (!down && g_btn_down) {
+    g_btn_down = false;
+    if (!g_btn_long_fired && (now - g_btn_down_ms) > 40) {
+      change_volume(+10);            // short press -> up
+    }
+  }
+}
+
 // Swipe up/down anywhere = volume up/down, with a curved volume bar.
 static void gesture_event_cb(lv_event_t *e)
 {
@@ -153,12 +196,10 @@ static void gesture_event_cb(lv_event_t *e)
   if (g_asleep) { wake_up(); return; }
   if (Face_GetState() == WB_LISTENING) return;   // don't fight an active recording
 
-  if (dir == LV_DIR_TOP) g_volume = min(100, g_volume + 10);
-  else if (dir == LV_DIR_BOTTOM) g_volume = max(0, g_volume - 10);
+  if (dir == LV_DIR_TOP) change_volume(+10);
+  else if (dir == LV_DIR_BOTTOM) change_volume(-10);
   else return;
 
-  Speaker_SetVolumePercent(g_volume);
-  Face_ShowVolume(g_volume);
   g_last_gesture_ms = millis();
 }
 
@@ -194,6 +235,8 @@ void setup()
 
   Face_SetState(WB_IDLE);
 
+  pinMode(BTN_BOOT, INPUT_PULLUP);   // BOOT button used for volume
+
   Mic_Begin();
   Speaker_Begin();
   Speaker_SetVolumePercent(g_volume);
@@ -209,6 +252,7 @@ void loop()
 {
   Lvgl_Loop();
   Face_Tick();
+  poll_boot_button();
 
   // While listening, keep capturing and auto-stop on silence.
   if (Face_GetState() == WB_LISTENING) {

@@ -1,14 +1,5 @@
 #include "speaker.h"
-#include <ESP_I2S.h>
-
-// ---- Speaker (PCM5101 DAC) I2S pins (Waveshare wiki) ----
-#define SPK_BCK   48
-#define SPK_WS    38
-#define SPK_DOUT  47
-
-#define PLAY_RATE 24000    // answer audio is 24 kHz mono (see server lib/wav.ts)
-
-static I2SClass s_i2s;
+#include "audio_bus.h"
 
 // Software gain applied before the samples reach the DAC. 1.0 = original level.
 // A gentle boost helps if the answer sounds quiet even with the amp turned up.
@@ -33,12 +24,8 @@ static inline int16_t apply_gain(int16_t sample)
 
 bool Speaker_Begin()
 {
-  s_i2s.setPins(SPK_BCK, SPK_WS, SPK_DOUT, -1 /*din*/, -1 /*mclk*/);
-  if (!s_i2s.begin(I2S_MODE_STD, PLAY_RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) {
-    Serial.println("[spk] i2s begin FAILED");
-    return false;
-  }
-  Serial.println("[spk] ready");
+  // The I2S bus is enabled on demand in Speaker_PlayWavStream() (shared with the
+  // mic). Nothing to do at boot.
   return true;
 }
 
@@ -73,6 +60,11 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
     return;
   }
 
+  if (!AudioBus_BeginSpeaker()) {
+    Serial.println("[spk] could not enable speaker bus");
+    return;
+  }
+
   int dataRemaining = (contentLen > 44) ? (contentLen - 44) : INT32_MAX;
 
   int16_t mono[512];
@@ -94,9 +86,10 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
       stereo[i * 2] = s;
       stereo[i * 2 + 1] = s;
     }
-    s_i2s.write((uint8_t *)stereo, samples * 2 * sizeof(int16_t));
+    wb_i2s.write((uint8_t *)stereo, samples * 2 * sizeof(int16_t));
 
     if (pump) pump();
   }
+  AudioBus_End();
   Serial.println("[spk] playback done");
 }

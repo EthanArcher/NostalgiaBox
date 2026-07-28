@@ -33,7 +33,7 @@ export const ANSWER_HEADERS = {
  * Build the HTTP response: WAV bytes as the body, answer text in headers.
  * `Cache-Control: no-store` because answers are per-child and never cached.
  */
-export function buildAnswerResponse(a: WonderAnswer): Response {
+export function buildAnswerResponse(a: WonderAnswer, debug?: string): Response {
   const headers = new Headers();
   headers.set("Content-Type", "audio/wav");
   headers.set("Content-Length", String(a.wav.length));
@@ -42,10 +42,11 @@ export function buildAnswerResponse(a: WonderAnswer): Response {
   headers.set(ANSWER_HEADERS.mode, a.mode);
   headers.set(ANSWER_HEADERS.isSpelling, a.isSpelling ? "1" : "0");
   headers.set(ANSWER_HEADERS.spellWord, encodeURIComponent(a.spellWord ?? ""));
+  if (debug) headers.set("X-Debug", encodeURIComponent(debug.slice(0, 400)));
   // Let non-device clients (e.g. a browser fetch, tests) read the custom headers.
   headers.set(
     "Access-Control-Expose-Headers",
-    Object.values(ANSWER_HEADERS).join(", "),
+    [...Object.values(ANSWER_HEADERS), "X-Debug"].join(", "),
   );
 
   // Copy into a fresh Uint8Array so the Web Response gets a clean ArrayBuffer.

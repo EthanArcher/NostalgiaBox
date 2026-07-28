@@ -55,9 +55,13 @@ export async function POST(request: Request): Promise<Response> {
   try {
     question = await transcribe(audio);
   } catch (e) {
-    console.error("[ask] STT failed:", e);
+    const msg = String((e as Error)?.message ?? e);
+    console.error("[ask] STT failed:", msg);
     const text = troubleMessage();
-    return buildAnswerResponse({ text, mode: "deferred", isSpelling: false, wav: await ttsOrChime(text) });
+    return buildAnswerResponse(
+      { text, mode: "deferred", isSpelling: false, wav: await ttsOrChime(text) },
+      "stt:" + msg,
+    );
   }
 
   // 2) Safety pipeline (2 gates + deterministic checks) -> answer text.
@@ -78,7 +82,15 @@ export async function POST(request: Request): Promise<Response> {
   console.log(`[ask] q="${question}" -> mode=${result.mode} cat=${result.category ?? "-"}`);
 
   // 4) Text-to-speech.
-  const wav = await ttsOrChime(result.text);
+  let ttsDebug = "";
+  let wav: Buffer;
+  try {
+    wav = await synthesize(result.text);
+  } catch (e) {
+    ttsDebug = "tts:" + String((e as Error)?.message ?? e);
+    console.error("[ask] TTS failed:", ttsDebug);
+    wav = generateChimeWav();
+  }
 
   const answer: WonderAnswer = {
     text: result.text,
@@ -87,7 +99,8 @@ export async function POST(request: Request): Promise<Response> {
     spellWord: result.spellWord,
     wav,
   };
-  return buildAnswerResponse(answer);
+  const debug = ttsDebug || `q="${question}" mode=${result.mode}`;
+  return buildAnswerResponse(answer, debug);
 }
 
 export function GET(): Response {

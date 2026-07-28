@@ -18,8 +18,12 @@
 #ifndef WIFI_PASSWORD
 #define WIFI_PASSWORD ""
 #endif
+// Default to the production server. If your secrets.h does NOT define
+// SERVER_BASE_URL, this correct URL is used automatically (so it can't get
+// stuck on a stale per-deployment URL). To point elsewhere, define it in
+// secrets.h.
 #ifndef SERVER_BASE_URL
-#define SERVER_BASE_URL ""
+#define SERVER_BASE_URL "https://wonderbox-mu.vercel.app"
 #endif
 #ifndef DEVICE_TOKEN
 #define DEVICE_TOKEN ""

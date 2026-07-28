@@ -197,6 +197,7 @@ void setup()
   Mic_Begin();
   Speaker_Begin();
   Speaker_SetVolumePercent(g_volume);
+  Speaker_TestBeep();   // if you hear a short beep, the speaker path works
 
   WiFiConn_Connect();
 

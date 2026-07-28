@@ -20,3 +20,7 @@ float Speaker_GetGain();
 
 // Volume as a friendly 0..100 percent (mapped to a safe gain range).
 void Speaker_SetVolumePercent(int pct);
+
+// Plays a short tone at boot to verify the speaker/amplifier path works
+// (independent of the network). If you hear it, the speaker is wired and on.
+void Speaker_TestBeep();

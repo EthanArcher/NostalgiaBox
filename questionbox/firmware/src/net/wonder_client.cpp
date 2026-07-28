@@ -64,6 +64,10 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
 #else
   s_tls.setCACert(WB_ROOT_CA);
 #endif
+  s_tls.setHandshakeTimeout(20);   // seconds; give the TLS handshake room
+
+  Serial.printf("[net] free heap %u, largest block %u\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
   String url = String(SERVER_BASE_URL) + "/api/ask";
   if (!s_http.begin(s_tls, url)) {
@@ -72,7 +76,8 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
   }
   s_open = true;
 
-  s_http.setTimeout(15000);
+  s_http.setConnectTimeout(20000);
+  s_http.setTimeout(20000);
   s_http.addHeader("Content-Type", "audio/wav");
   s_http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
 

@@ -9,9 +9,10 @@
 #define LCD_WIDTH     EXAMPLE_LCD_WIDTH
 #define LCD_HEIGHT    EXAMPLE_LCD_HEIGHT
 
-// Partial render buffer: 1/6 of the screen, double-buffered. Bigger buffer =
-// fewer flushes per frame = smoother animation, while still fitting SRAM.
-#define LVGL_BUF_LEN  (LCD_WIDTH * LCD_HEIGHT / 6)
+// Partial render buffer: 1/12 of the screen, double-buffered. Kept modest so
+// there's plenty of internal RAM left for the Wi-Fi/TLS network stack (a bigger
+// buffer starved the HTTPS handshake and broke the server call).
+#define LVGL_BUF_LEN  (LCD_WIDTH * LCD_HEIGHT / 12)
 
 #define EXAMPLE_LVGL_TICK_PERIOD_MS  10
 

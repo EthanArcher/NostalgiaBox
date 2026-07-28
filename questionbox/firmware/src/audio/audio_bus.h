@@ -1,20 +1,24 @@
 #pragma once
-#include <ESP_I2S.h>
+#include <stddef.h>
+#include <stdbool.h>
 
-// A SINGLE shared I2S peripheral for both the microphone (record) and the
-// PCM5101 speaker (playback). They use different pins, so we (re)configure and
-// enable the one bus only for the operation we're doing right now, and disable
-// it afterwards. This avoids two drivers fighting over the hardware (which was
-// leaving the mic channel disabled -> 0 samples recorded).
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Microphone and speaker each get their OWN dedicated I2S controller, set up
+// once at boot and kept enabled. This avoids (a) two drivers fighting over one
+// controller (which disabled the mic) and (b) opening/closing channels
+// repeatedly (which leaked channels until "no available channel found").
 //
-// WonderBox is push-to-talk / half-duplex, so we never record and play at once.
+//   mic     -> I2S_NUM_0, RX, 16 kHz stereo   (BCK 15, WS 2, DIN 39)
+//   speaker -> I2S_NUM_1, TX, 24 kHz stereo   (BCK 48, WS 38, DOUT 47)
 
-extern I2SClass wb_i2s;
+bool   AudioBus_Init(void);                          // create + enable both, once
+size_t AudioBus_MicRead(void *buf, size_t len);      // returns bytes read
+size_t AudioBus_SpeakerWrite(const void *buf, size_t len);
+void   AudioBus_MicFlush(void);                      // drop stale mic samples
 
-// Mic pins (Waveshare wiki): BCK 15, WS 2, DIN 39.
-bool AudioBus_BeginMic();      // enable RX @ 16 kHz stereo
-
-// Speaker pins (Waveshare wiki): BCK 48, WS 38, DOUT 47.
-bool AudioBus_BeginSpeaker();  // enable TX @ 24 kHz stereo
-
-void AudioBus_End();           // disable/free the bus
+#ifdef __cplusplus
+}
+#endif

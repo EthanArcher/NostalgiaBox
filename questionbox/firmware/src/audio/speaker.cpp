@@ -13,6 +13,14 @@ void Speaker_SetGain(float g)
 }
 float Speaker_GetGain() { return s_gain; }
 
+void Speaker_SetVolumePercent(int pct)
+{
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  // 0% -> silent, ~65% -> unity, 100% -> ~2.6x boost.
+  s_gain = (pct / 100.0f) * 2.6f;
+}
+
 static inline int16_t apply_gain(int16_t sample)
 {
   if (s_gain == 1.0f) return sample;
@@ -60,11 +68,6 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
     return;
   }
 
-  if (!AudioBus_BeginSpeaker()) {
-    Serial.println("[spk] could not enable speaker bus");
-    return;
-  }
-
   int dataRemaining = (contentLen > 44) ? (contentLen - 44) : INT32_MAX;
 
   int16_t mono[512];
@@ -86,10 +89,9 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
       stereo[i * 2] = s;
       stereo[i * 2 + 1] = s;
     }
-    wb_i2s.write((uint8_t *)stereo, samples * 2 * sizeof(int16_t));
+    AudioBus_SpeakerWrite((uint8_t *)stereo, samples * 2 * sizeof(int16_t));
 
     if (pump) pump();
   }
-  AudioBus_End();
   Serial.println("[spk] playback done");
 }

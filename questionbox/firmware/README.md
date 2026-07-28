@@ -25,15 +25,18 @@ mic never listens on its own. **Audio is recorded, sent, and discarded — never
 stored** on the device.
 
 **How you interact:**
-- **Tap the face** to start listening (it grins big and a soft, flowing light
-  sweeps around the edge, Siri-style). Tap again — or just stop talking — to
-  send. There's no separate button. The face also gently looks around and blinks
-  so it feels alive.
+- **Tap the face** to start a question; **tap again when you're done** to send.
+  A soft, cool, flowing light sweeps around the edge (Siri-style) while it
+  listens. The face gently looks around and blinks so it feels alive.
+- **Volume:** **swipe up/down** on the screen to raise/lower the volume; a
+  minimal curved volume bar appears. (The board's physical side control is the
+  BOOT/RESET pair + a hardware amp knob; there isn't a code-readable pair of
+  volume buttons, so volume is done in software via swipe.)
 - **Auto-sleep:** after 30 seconds of no use, the screen goes dark. **Tap to
   wake** it (that first tap only wakes; tap again to ask).
-- **Volume:** the two **physical buttons on the side** control the speaker
-  amplifier directly (press to change loudness). There's also a software boost
-  in `src/audio/speaker.cpp` (`Speaker_SetGain`) if it's still too quiet.
+
+Audio uses a single, dedicated I2S controller per device (mic on I2S0, speaker
+on I2S1), set up once — see `src/audio/audio_bus.c`.
 
 > **Stage 4 update:** the server now runs the real (multi-second) STT → safety →
 > LLM → TTS pipeline, so the device sends the request on a **background task**.

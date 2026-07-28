@@ -18,6 +18,9 @@ WbState Face_GetState(void);
 // The full word is shown softly at the bottom as a caption.
 void Face_ShowSpelling(const char *word);
 
+// Briefly shows a minimal curved volume bar at `pct` (0..100).
+void Face_ShowVolume(int pct);
+
 // Advances all procedural animations. Call frequently from the main loop
 // (it is cheap and self-throttling via the LVGL tick).
 void Face_Tick(void);

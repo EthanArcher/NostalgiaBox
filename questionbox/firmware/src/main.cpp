@@ -40,6 +40,10 @@ static size_t        g_wav_len = 0;
 static uint32_t g_last_activity = 0;
 static bool     g_asleep = false;
 
+// ---- Volume (software) ----
+static int      g_volume = 70;           // 0..100
+static uint32_t g_last_gesture_ms = 0;
+
 static void note_activity() { g_last_activity = millis(); }
 
 static void pump_ui()
@@ -133,7 +137,29 @@ static void tap_event_cb(lv_event_t *e)
     wake_up();
     return;
   }
+  if (millis() - g_last_gesture_ms < 500) return;  // ignore the click that ends a swipe
   handle_tap();
+}
+
+// Swipe up/down anywhere = volume up/down, with a curved volume bar.
+static void gesture_event_cb(lv_event_t *e)
+{
+  (void)e;
+  lv_indev_t *indev = lv_indev_get_act();
+  if (!indev) return;
+  lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+
+  note_activity();
+  if (g_asleep) { wake_up(); return; }
+  if (Face_GetState() == WB_LISTENING) return;   // don't fight an active recording
+
+  if (dir == LV_DIR_TOP) g_volume = min(100, g_volume + 10);
+  else if (dir == LV_DIR_BOTTOM) g_volume = max(0, g_volume - 10);
+  else return;
+
+  Speaker_SetVolumePercent(g_volume);
+  Face_ShowVolume(g_volume);
+  g_last_gesture_ms = millis();
 }
 
 static void Board_Init()
@@ -164,11 +190,13 @@ void setup()
   lv_obj_add_flag(touch, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(touch, LV_OPA_TRANSP, 0);
   lv_obj_add_event_cb(touch, tap_event_cb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(touch, gesture_event_cb, LV_EVENT_GESTURE, nullptr);
 
   Face_SetState(WB_IDLE);
 
   Mic_Begin();
   Speaker_Begin();
+  Speaker_SetVolumePercent(g_volume);
 
   WiFiConn_Connect();
 

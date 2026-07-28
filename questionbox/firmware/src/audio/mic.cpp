@@ -5,21 +5,13 @@
 #include <math.h>
 
 #define REC_RATE        16000
-#define REC_MAX_SEC     10
+#define REC_MAX_SEC     15                  // safety cap; normally you tap to stop
 #define REC_MAX_SAMPLES (REC_RATE * REC_MAX_SEC)
 #define WAV_HEADER_LEN  44
-
-#define SILENCE_RMS      700
-#define SILENCE_MS       1200
-#define MIN_RECORD_MS    400
 
 static uint8_t *s_buf = nullptr;     // [WAV header | mono int16 PCM]
 static size_t   s_count = 0;
 static bool     s_recording = false;
-
-static bool     s_speech = false;
-static uint32_t s_start_ms = 0;
-static uint32_t s_last_loud_ms = 0;
 
 static inline int16_t clamp16(int32_t v)
 {
@@ -50,29 +42,21 @@ static void write_wav_header(uint8_t *h, uint32_t dataLen, uint32_t rate)
 
 bool Mic_Begin()
 {
-  // Only allocate the record buffer here. The I2S bus is enabled on demand in
-  // Mic_Start() (shared with the speaker), so nothing fights over the hardware.
   s_buf = (uint8_t *)heap_caps_malloc(WAV_HEADER_LEN + REC_MAX_SAMPLES * 2, MALLOC_CAP_SPIRAM);
   if (!s_buf) {
     Serial.println("[mic] FAILED to allocate PSRAM record buffer");
     return false;
   }
+  AudioBus_Init();          // mic + speaker channels are created once, here
   Serial.println("[mic] buffer ready");
   return true;
 }
 
 void Mic_Start()
 {
-  if (!AudioBus_BeginMic()) {
-    Serial.println("[mic] could not enable mic bus");
-    s_recording = false;
-    return;
-  }
+  AudioBus_MicFlush();      // drop stale samples so we start clean
   s_count = 0;
   s_recording = true;
-  s_speech = false;
-  s_start_ms = millis();
-  s_last_loud_ms = s_start_ms;
   Serial.println("[mic] recording started");
 }
 
@@ -80,7 +64,6 @@ void Mic_Stop()
 {
   if (!s_recording) return;
   s_recording = false;
-  AudioBus_End();
   Serial.printf("[mic] recording stopped (%u samples, %.2fs)\n",
                 (unsigned)s_count, (float)s_count / REC_RATE);
 }
@@ -90,38 +73,19 @@ bool Mic_Poll()
   if (!s_recording) return false;
 
   uint8_t tmp[2048];
-  int avail = wb_i2s.available();
-  if (avail > 0) {
-    int n = avail;
-    if (n > (int)sizeof(tmp)) n = sizeof(tmp);
-    n &= ~0x3;
-    if (n > 0) {
-      int got = wb_i2s.readBytes((char *)tmp, n);
-      int frames = got / 4;
-      int16_t *in = (int16_t *)tmp;
-      int16_t *out = (int16_t *)(s_buf + WAV_HEADER_LEN);
-      uint64_t energy = 0;
-      for (int i = 0; i < frames && s_count < REC_MAX_SAMPLES; i++) {
-        int32_t mono = (int32_t)in[i * 2] + (int32_t)in[i * 2 + 1];
-        int16_t m = clamp16(mono);
-        out[s_count++] = m;
-        energy += (uint64_t)((int32_t)m * m);
-      }
-      if (frames > 0) {
-        uint32_t rms = (uint32_t)sqrt((double)energy / frames);
-        if (rms > SILENCE_RMS) {
-          s_speech = true;
-          s_last_loud_ms = millis();
-        }
-      }
+  size_t got = AudioBus_MicRead(tmp, sizeof(tmp));
+  if (got >= 4) {
+    int frames = got / 4;
+    int16_t *in = (int16_t *)tmp;
+    int16_t *out = (int16_t *)(s_buf + WAV_HEADER_LEN);
+    for (int i = 0; i < frames && s_count < REC_MAX_SAMPLES; i++) {
+      int32_t mono = (int32_t)in[i * 2] + (int32_t)in[i * 2 + 1];  // L + R
+      out[s_count++] = clamp16(mono);
     }
   }
 
-  uint32_t now = millis();
-  bool max_reached = s_count >= REC_MAX_SAMPLES;
-  bool silence_stop = s_speech && (now - s_start_ms > MIN_RECORD_MS) &&
-                      (now - s_last_loud_ms > SILENCE_MS);
-  if (max_reached || silence_stop) {
+  // Stop only when the child taps again (handled in main) or the safety cap hits.
+  if (s_count >= REC_MAX_SAMPLES) {
     Mic_Stop();
     return false;
   }

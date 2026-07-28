@@ -24,12 +24,13 @@
 // ---- Warm, friendly palette ----
 #define COL_BG      0xFFF3E0
 #define COL_INK     0x3A3F58
-#define COL_CHEEK   0xFFB4A2
 #define COL_LETTER  0x2E7DE1
-// Flowing edge-glow colors (blend as they overlap)
-#define COL_GLOW1   0xFF7A59  // coral
-#define COL_GLOW2   0x6FA8FF  // blue
-#define COL_GLOW3   0xB18CFF  // lavender
+// Cool, Siri-like flowing edge colors (blend as they overlap)
+#define COL_GLOW1   0x37D6D6  // teal
+#define COL_GLOW2   0x4AA8FF  // cyan-blue
+#define COL_GLOW3   0x8E7BFF  // indigo
+#define COL_VOLTRK  0xE7DECB  // volume bar track
+#define COL_VOLFILL 0x4AA8FF  // volume bar fill
 
 // ---- Geometry (center 180,180) ----
 static const int EYE_D    = 60;
@@ -40,11 +41,13 @@ static const int EDGE_D   = 352;
 
 // ---- Objects ----
 static lv_obj_t *eye_l, *eye_r;
-static lv_obj_t *cheek_l, *cheek_r;
 static lv_obj_t *smile;        // arc smile (idle/listening/thinking)
 static lv_obj_t *talk;         // filled mouth (speaking)
 static lv_obj_t *comets[3];    // flowing edge glow
+static lv_obj_t *vol_arc;      // curved volume bar
 static lv_obj_t *letter_lbl, *word_lbl;
+
+static uint32_t vol_hide_ms = 0;   // when to auto-hide the volume bar
 
 static WbState current = WB_IDLE;
 
@@ -108,19 +111,12 @@ void Face_Create(void)
   lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-  // Edge glow (behind everything): three colored arc segments we rotate.
+  // Edge glow (behind everything): three cool arc segments hugging the edge.
   const uint32_t glow_cols[3] = {COL_GLOW1, COL_GLOW2, COL_GLOW3};
   for (int i = 0; i < 3; i++) {
-    comets[i] = make_arc(scr, glow_cols[i], EDGE_D, 16);
-    lv_arc_set_bg_angles(comets[i], 0, 96);   // fixed segment; we spin via rotation
+    comets[i] = make_arc(scr, glow_cols[i], EDGE_D, 10);
+    lv_arc_set_bg_angles(comets[i], 0, 110);  // fixed segment; we spin via rotation
   }
-
-  cheek_l = make_blob(scr, COL_CHEEK, LV_OPA_50);
-  cheek_r = make_blob(scr, COL_CHEEK, LV_OPA_50);
-  lv_obj_set_size(cheek_l, 30, 30);
-  lv_obj_set_size(cheek_r, 30, 30);
-  lv_obj_align(cheek_l, LV_ALIGN_CENTER, -92, 8);
-  lv_obj_align(cheek_r, LV_ALIGN_CENTER, 92, 8);
 
   eye_l = make_blob(scr, COL_INK, LV_OPA_COVER);
   eye_r = make_blob(scr, COL_INK, LV_OPA_COVER);
@@ -146,6 +142,25 @@ void Face_Create(void)
   lv_obj_set_style_text_font(word_lbl, &lv_font_montserrat_28, 0);
   lv_label_set_text(word_lbl, "");
   lv_obj_align(word_lbl, LV_ALIGN_CENTER, 0, 70);
+
+  // Minimal curved volume bar (a rounded arc that fills as volume rises).
+  vol_arc = lv_arc_create(scr);
+  lv_obj_remove_style_all(vol_arc);
+  lv_obj_clear_flag(vol_arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_size(vol_arc, 300, 300);
+  lv_obj_center(vol_arc);
+  lv_arc_set_rotation(vol_arc, 0);
+  lv_arc_set_bg_angles(vol_arc, 40, 140);       // a curved bar across the bottom
+  lv_arc_set_range(vol_arc, 0, 100);
+  lv_obj_set_style_arc_color(vol_arc, lv_color_hex(COL_VOLTRK), LV_PART_MAIN);
+  lv_obj_set_style_arc_width(vol_arc, 12, LV_PART_MAIN);
+  lv_obj_set_style_arc_rounded(vol_arc, true, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(vol_arc, lv_color_hex(COL_VOLFILL), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(vol_arc, 12, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(vol_arc, true, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_opa(vol_arc, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(vol_arc, 0, LV_PART_KNOB);
+  lv_obj_add_flag(vol_arc, LV_OBJ_FLAG_HIDDEN);
 
   schedule_blink(lv_tick_get());
   Face_SetState(WB_IDLE);
@@ -178,8 +193,6 @@ void Face_SetState(WbState state)
 
   show(eye_l, face);
   show(eye_r, face);
-  show(cheek_l, face);
-  show(cheek_r, face);
   show(smile, face && !speak);        // smile for idle/listening/thinking
   show(talk, speak);                  // open mouth only while speaking
   for (int i = 0; i < 3; i++) show(comets[i], glow);
@@ -194,6 +207,15 @@ void Face_SetState(WbState state)
   gaze_next_ms = now + 400;
   gaze_tx = gaze_ty = 0;
   spell_last_ms = now;
+}
+
+void Face_ShowVolume(int pct)
+{
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  lv_arc_set_value(vol_arc, pct);
+  lv_obj_clear_flag(vol_arc, LV_OBJ_FLAG_HIDDEN);
+  vol_hide_ms = lv_tick_get() + 1500;   // auto-hide after 1.5s
 }
 
 void Face_ShowSpelling(const char *word)
@@ -266,6 +288,12 @@ void Face_Tick(void)
 {
   uint32_t now = lv_tick_get();
   float t = now / 1000.0f;
+
+  // Auto-hide the volume bar.
+  if (vol_hide_ms != 0 && now >= vol_hide_ms) {
+    lv_obj_add_flag(vol_arc, LV_OBJ_FLAG_HIDDEN);
+    vol_hide_ms = 0;
+  }
 
   switch (current) {
     case WB_IDLE:

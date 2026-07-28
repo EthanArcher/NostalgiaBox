@@ -14,7 +14,9 @@ bool Speaker_Begin();
 // transiently and never stored.
 void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)());
 
-// Software loudness on top of the physical amplifier volume buttons.
-// gain 1.0 = as-is; >1.0 boosts (clamped to avoid clipping). Range ~0.0..4.0.
+// Software loudness. gain 1.0 = as-is; >1.0 boosts (clamped). Range ~0.0..4.0.
 void  Speaker_SetGain(float gain);
 float Speaker_GetGain();
+
+// Volume as a friendly 0..100 percent (mapped to a safe gain range).
+void Speaker_SetVolumePercent(int pct);

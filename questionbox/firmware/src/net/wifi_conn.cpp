@@ -39,6 +39,7 @@ bool WiFiConn_Connect(uint32_t timeout_ms)
   }
 
   if (WiFiConn_IsConnected()) {
+    WiFi.setSleep(false);        // power-save was causing intermittent DNS/connection drops
     set_public_dns();
     Serial.printf("[wifi] connected, IP = %s (DNS 8.8.8.8/1.1.1.1)\n", WiFi.localIP().toString().c_str());
     return true;

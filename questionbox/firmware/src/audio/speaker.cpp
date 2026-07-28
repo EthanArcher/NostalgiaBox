@@ -67,7 +67,7 @@ void Speaker_TestBeep()
     for (int i = 0; i < cnt; i++) {
       float t = (float)(done + i) / rate;
       float env = sinf(3.14159265f * (done + i) / total);   // gentle fade in/out
-      float s = sinf(2.0f * 3.14159265f * 700.0f * t) * 0.35f * env;
+      float s = sinf(2.0f * 3.14159265f * 700.0f * t) * 0.6f * env;   // louder for audibility
       int16_t v = (int16_t)(s * 32767);
       buf[i * 2] = v;
       buf[i * 2 + 1] = v;

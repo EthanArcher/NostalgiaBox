@@ -193,13 +193,13 @@ void Face_SetState(WbState state)
 
   show(eye_l, face);
   show(eye_r, face);
-  show(smile, face && !speak);        // smile for idle/listening/thinking
-  show(talk, speak);                  // open mouth only while speaking
+  show(smile, face);                  // keep smiling in every face state (incl. speaking)
+  show(talk, false);                  // retired the awkward open mouth
   for (int i = 0; i < 3; i++) show(comets[i], glow);
   show(letter_lbl, spell);
   show(word_lbl, spell);
 
-  if (face && !speak) set_smile(listen);   // big happy smile while listening
+  if (face) set_smile(listen || speak);    // big happy smile while listening AND speaking
 
   uint32_t now = lv_tick_get();
   blink_start_ms = 0;
@@ -314,17 +314,12 @@ void Face_Tick(void)
       spin_edge(t * 75.0f, 110);             // slow, gentle
       break;
 
-    case WB_SPEAKING: {
-      gaze_tx = 0; gaze_ty = 0;
-      update_gaze(now, false);
+    case WB_SPEAKING:
+      // Stay smiling and lively while talking: eyes look around, edge flows.
+      update_gaze(now, true);
       place_eyes(blink_factor(now));
-      float m = 0.5f + 0.5f * sinf(t * 11.0f);
-      int h = 16 + (int)(40 * m);
-      lv_obj_set_size(talk, 80, h);
-      lv_obj_align(talk, LV_ALIGN_CENTER, 0, MOUTH_DY);
-      spin_edge(t * 130.0f, 170);            // medium
+      spin_edge(t * 130.0f, 190);
       break;
-    }
 
     case WB_SPELLING:
       if (spell_len > 0 && now - spell_last_ms >= SPELL_STEP_MS) {

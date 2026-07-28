@@ -73,7 +73,7 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
   String base = SERVER_BASE_URL;
   while (base.length() > 0 && base.endsWith("/")) base.remove(base.length() - 1);
   String url = base + "/api/ask";
-  static const char *collect[] = {"X-Answer-Text", "X-Answer-Mode", "X-Is-Spelling", "X-Spell-Word"};
+  static const char *collect[] = {"X-Answer-Text", "X-Answer-Mode", "X-Is-Spelling", "X-Spell-Word", "X-Debug"};
 
   // Retry a few times so a transient DNS/TLS hiccup doesn't drop the question.
   int code = -1;
@@ -92,7 +92,7 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
       s_http.addHeader("x-vercel-protection-bypass", VERCEL_BYPASS_SECRET);
       s_http.addHeader("x-vercel-set-bypass-cookie", "true");
     }
-    s_http.collectHeaders(collect, 4);
+    s_http.collectHeaders(collect, 5);
 
     Serial.printf("[net] POST %s (%u bytes) [try %d]\n", url.c_str(), (unsigned)len, attempt);
     code = s_http.POST((uint8_t *)wav, len);
@@ -110,6 +110,9 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
     Serial.println("[net] Deployment Protection. Fix: turn it OFF (or 'Only Preview')");
     Serial.println("[net] and use your PRODUCTION vercel.app URL in secrets.h.");
   }
+
+  String dbg = s_http.header("X-Debug");
+  if (dbg.length()) Serial.printf("[net] debug: %s\n", urlDecode(dbg).c_str());
 
   if (code == 200) {
     out.text = urlDecode(s_http.header("X-Answer-Text"));

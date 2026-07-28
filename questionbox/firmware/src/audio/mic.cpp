@@ -79,7 +79,9 @@ bool Mic_Poll()
     int16_t *in = (int16_t *)tmp;
     int16_t *out = (int16_t *)(s_buf + WAV_HEADER_LEN);
     for (int i = 0; i < frames && s_count < REC_MAX_SAMPLES; i++) {
-      int32_t mono = (int32_t)in[i * 2] + (int32_t)in[i * 2 + 1];  // L + R
+      // Average the two slots (not sum) so a mic that duplicates onto both
+      // channels doesn't clip/distort the recording.
+      int32_t mono = ((int32_t)in[i * 2] + (int32_t)in[i * 2 + 1]) / 2;
       out[s_count++] = clamp16(mono);
     }
   }

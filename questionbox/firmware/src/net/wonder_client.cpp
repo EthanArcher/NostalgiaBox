@@ -69,7 +69,10 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
   Serial.printf("[net] free heap %u, largest block %u\n",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
-  String url = String(SERVER_BASE_URL) + "/api/ask";
+  // Strip any trailing '/' so we don't POST to "...app//api/ask" (Vercel 308s on that).
+  String base = SERVER_BASE_URL;
+  while (base.length() > 0 && base.endsWith("/")) base.remove(base.length() - 1);
+  String url = base + "/api/ask";
   static const char *collect[] = {"X-Answer-Text", "X-Answer-Mode", "X-Is-Spelling", "X-Spell-Word"};
 
   // Retry a few times so a transient DNS/TLS hiccup doesn't drop the question.

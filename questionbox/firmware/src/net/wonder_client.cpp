@@ -69,30 +69,41 @@ int WonderClient_Ask(const uint8_t *wav, size_t len, AnswerInfo &out)
   Serial.printf("[net] free heap %u, largest block %u\n",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
-  String url = String(SERVER_BASE_URL) + "/api/ask";
-  if (!s_http.begin(s_tls, url)) {
-    Serial.println("[net] http.begin failed");
-    return -1;
-  }
-  s_open = true;
-
-  s_http.setConnectTimeout(20000);
-  s_http.setTimeout(20000);
-  s_http.addHeader("Content-Type", "audio/wav");
-  s_http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
-
-  // Optional: bypass Vercel Deployment Protection without disabling it.
-  if (sizeof(VERCEL_BYPASS_SECRET) > 1) {
-    s_http.addHeader("x-vercel-protection-bypass", VERCEL_BYPASS_SECRET);
-    s_http.addHeader("x-vercel-set-bypass-cookie", "true");
-  }
-
+  // Strip any trailing '/' so we don't POST to "...app//api/ask" (Vercel 308s on that).
+  String base = SERVER_BASE_URL;
+  while (base.length() > 0 && base.endsWith("/")) base.remove(base.length() - 1);
+  String url = base + "/api/ask";
   static const char *collect[] = {"X-Answer-Text", "X-Answer-Mode", "X-Is-Spelling", "X-Spell-Word"};
-  s_http.collectHeaders(collect, 4);
 
-  Serial.printf("[net] POST %s (%u bytes)\n", url.c_str(), (unsigned)len);
-  int code = s_http.POST((uint8_t *)wav, len);
-  Serial.printf("[net] status %d\n", code);
+  // Retry a few times so a transient DNS/TLS hiccup doesn't drop the question.
+  int code = -1;
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    if (!s_http.begin(s_tls, url)) {
+      Serial.println("[net] http.begin failed");
+      delay(600);
+      continue;
+    }
+    s_open = true;
+    s_http.setConnectTimeout(20000);
+    s_http.setTimeout(20000);
+    s_http.addHeader("Content-Type", "audio/wav");
+    s_http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
+    if (sizeof(VERCEL_BYPASS_SECRET) > 1) {
+      s_http.addHeader("x-vercel-protection-bypass", VERCEL_BYPASS_SECRET);
+      s_http.addHeader("x-vercel-set-bypass-cookie", "true");
+    }
+    s_http.collectHeaders(collect, 4);
+
+    Serial.printf("[net] POST %s (%u bytes) [try %d]\n", url.c_str(), (unsigned)len, attempt);
+    code = s_http.POST((uint8_t *)wav, len);
+    Serial.printf("[net] status %d\n", code);
+
+    if (code > 0) break;   // got an HTTP response; stop retrying
+    s_http.end();          // transport error (DNS/TLS) -> reset and retry
+    s_tls.stop();
+    s_open = false;
+    delay(900);
+  }
 
   if (code >= 300 && code < 400) {
     Serial.println("[net] server redirected (3xx). This is almost always Vercel");

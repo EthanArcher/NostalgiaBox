@@ -2,6 +2,19 @@
 #include "device_config.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include "lwip/dns.h"
+
+// The device's DHCP-provided DNS was intermittently failing to resolve the
+// server. Force reliable public DNS servers (Google + Cloudflare).
+static void set_public_dns()
+{
+  ip_addr_t d1;
+  ip_addr_t d2;
+  IP_ADDR4(&d1, 8, 8, 8, 8);
+  IP_ADDR4(&d2, 1, 1, 1, 1);
+  dns_setserver(0, &d1);
+  dns_setserver(1, &d2);
+}
 
 bool WiFiConn_IsConnected()
 {
@@ -26,7 +39,8 @@ bool WiFiConn_Connect(uint32_t timeout_ms)
   }
 
   if (WiFiConn_IsConnected()) {
-    Serial.printf("[wifi] connected, IP = %s\n", WiFi.localIP().toString().c_str());
+    set_public_dns();
+    Serial.printf("[wifi] connected, IP = %s (DNS 8.8.8.8/1.1.1.1)\n", WiFi.localIP().toString().c_str());
     return true;
   }
   Serial.println("[wifi] connection FAILED");

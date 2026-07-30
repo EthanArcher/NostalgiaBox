@@ -50,11 +50,16 @@ export async function POST(request: Request): Promise<Response> {
 
   const startedAt = Date.now();
 
+  // Load editable rules NOW, concurrently with transcription — they don't depend
+  // on the question, so the Supabase fetch overlaps STT instead of adding latency.
+  const rulesPromise = getRules();
+
   // 1) Speech-to-text (audio discarded right after).
   let question = "";
   try {
     question = await transcribe(audio);
   } catch (e) {
+    rulesPromise.catch(() => {}); // don't leak the pending rules fetch
     const msg = String((e as Error)?.message ?? e);
     console.error("[ask] STT failed:", msg);
     const text = troubleMessage();
@@ -65,11 +70,22 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // 2) Safety pipeline (2 gates + deterministic checks) -> answer text.
-  const rules = await getRules(); // editable rules from Supabase (or defaults)
+  const rules = await rulesPromise; // editable rules from Supabase (or defaults)
   const result = await answerQuestion(question, makeRealDeps(rules), rules);
+  console.log(`[ask] q="${question}" -> mode=${result.mode} cat=${result.category ?? "-"}`);
 
-  // 3) Text-only logging to Supabase (audio is NEVER logged). Best-effort.
-  await logInteraction({
+  // 3) & 4) Text-to-speech and text-only logging run CONCURRENTLY: logging no
+  // longer sits on the critical path in front of the audio (audio is never logged).
+  const ttsPromise = (async (): Promise<{ wav: Buffer; debug: string }> => {
+    try {
+      return { wav: await synthesize(result.text), debug: "" };
+    } catch (e) {
+      const debug = "tts:" + String((e as Error)?.message ?? e);
+      console.error("[ask] TTS failed:", debug);
+      return { wav: generateChimeWav(), debug };
+    }
+  })();
+  const logPromise = logInteraction({
     question,
     answer: result.text,
     mode: result.mode,
@@ -79,18 +95,8 @@ export async function POST(request: Request): Promise<Response> {
     spellWord: result.spellWord,
     latencyMs: Date.now() - startedAt,
   });
-  console.log(`[ask] q="${question}" -> mode=${result.mode} cat=${result.category ?? "-"}`);
 
-  // 4) Text-to-speech.
-  let ttsDebug = "";
-  let wav: Buffer;
-  try {
-    wav = await synthesize(result.text);
-  } catch (e) {
-    ttsDebug = "tts:" + String((e as Error)?.message ?? e);
-    console.error("[ask] TTS failed:", ttsDebug);
-    wav = generateChimeWav();
-  }
+  const [{ wav, debug: ttsDebug }] = await Promise.all([ttsPromise, logPromise]);
 
   const answer: WonderAnswer = {
     text: result.text,

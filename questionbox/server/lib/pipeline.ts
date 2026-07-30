@@ -83,20 +83,34 @@ export async function answerQuestion(
     };
   }
 
-  // --- Gate 1: LLM classifier (default to defer on anything but "answer") ---
+  // --- Gates 1 & 2 run CONCURRENTLY (to cut latency) ---
+  // Both safety gates are still fully enforced: the generated answer is only USED
+  // if the classifier returns "answer" AND every post-check below passes. Kicking
+  // off both LLM calls together just removes one round-trip from the common
+  // (answerable) path; the speculative answer is discarded when we defer/refuse.
+  const clsPromise = deps.classify(q);
+  const genPromise = deps.generate(q);
+
   let cls: { decision: "answer" | "defer" | "refuse"; category?: string; reason?: string };
   try {
-    cls = await deps.classify(q);
+    cls = await clsPromise;
   } catch {
+    genPromise.catch(() => {}); // discard the speculative answer's result/rejection
     return defer(q, "classify_error");
   }
-  if (cls.decision === "refuse") return refuse(cls.reason ?? "llm_refuse", cls.category);
-  if (cls.decision !== "answer") return defer(q, cls.reason ?? "llm_defer", cls.category);
+  if (cls.decision === "refuse") {
+    genPromise.catch(() => {});
+    return refuse(cls.reason ?? "llm_refuse", cls.category);
+  }
+  if (cls.decision !== "answer") {
+    genPromise.catch(() => {});
+    return defer(q, cls.reason ?? "llm_defer", cls.category);
+  }
 
   // --- Gate 2: answer model under the strict system prompt ---
   let raw: string;
   try {
-    raw = await deps.generate(q);
+    raw = await genPromise;
   } catch {
     return defer(q, "generate_error", cls.category);
   }

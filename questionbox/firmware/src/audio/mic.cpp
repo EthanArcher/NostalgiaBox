@@ -9,12 +9,14 @@
 #define REC_MAX_SAMPLES (REC_RATE * REC_MAX_SEC)
 #define WAV_HEADER_LEN  44
 
-static int32_t *s_cap = nullptr;     // captured mono, 32-bit (pre-normalization)
+// The ES7210 delivers 16-bit STEREO frames (two mic channels). We downmix to
+// mono and store 16-bit samples; a light normalization pass in Mic_GetWav lifts
+// the level so speech transcribes cleanly regardless of the raw mic scale.
+static int16_t *s_cap = nullptr;     // captured mono, int16
 static uint8_t *s_buf = nullptr;     // output WAV: [44-byte header | mono int16 PCM]
 static size_t   s_count = 0;
 static bool     s_recording = false;
 
-// Level metering.
 static int32_t  s_peakMono = 0;
 
 static inline int16_t clamp16(int32_t v)
@@ -46,7 +48,7 @@ static void write_wav_header(uint8_t *h, uint32_t dataLen, uint32_t rate)
 
 bool Mic_Begin()
 {
-  s_cap = (int32_t *)heap_caps_malloc(REC_MAX_SAMPLES * sizeof(int32_t), MALLOC_CAP_SPIRAM);
+  s_cap = (int16_t *)heap_caps_malloc(REC_MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM);
   s_buf = (uint8_t *)heap_caps_malloc(WAV_HEADER_LEN + REC_MAX_SAMPLES * 2, MALLOC_CAP_SPIRAM);
   if (!s_cap || !s_buf) {
     Serial.println("[mic] FAILED to allocate PSRAM buffers");
@@ -59,6 +61,7 @@ bool Mic_Begin()
 
 void Mic_Start()
 {
+  AudioBus_SetSampleRate(REC_RATE);   // ensure the bus is clocking the mic codec
   AudioBus_MicFlush();
   s_count = 0;
   s_peakMono = 0;
@@ -70,7 +73,7 @@ void Mic_Stop()
 {
   if (!s_recording) return;
   s_recording = false;
-  Serial.printf("[mic] stopped: %u samples %.2fs | peak=%d (32-bit ONLY_LEFT)\n",
+  Serial.printf("[mic] stopped: %u samples %.2fs | peak=%d\n",
                 (unsigned)s_count, (float)s_count / REC_RATE, (int)s_peakMono);
 }
 
@@ -78,17 +81,14 @@ bool Mic_Poll()
 {
   if (!s_recording) return false;
 
-  uint8_t tmp[2048];                       // 32-bit mono samples = 4 bytes each
+  int16_t tmp[1024];                       // 16-bit stereo samples (L,R interleaved)
   size_t got = AudioBus_MicRead(tmp, sizeof(tmp));
-  if (got >= 4) {
-    int n = got / 4;
-    int32_t *in = (int32_t *)tmp;
-    for (int i = 0; i < n && s_count < REC_MAX_SAMPLES; i++) {
-      int32_t s = in[i];
-      int32_t a = s < 0 ? -s : s;
-      if (a > s_peakMono) s_peakMono = a;
-      s_cap[s_count++] = s;
-    }
+  int total = (int)(got / sizeof(int16_t));
+  for (int i = 0; i + 1 < total && s_count < REC_MAX_SAMPLES; i += 2) {
+    int32_t mono = ((int32_t)tmp[i] + (int32_t)tmp[i + 1]) / 2;   // downmix two mics
+    int32_t a = mono < 0 ? -mono : mono;
+    if (a > s_peakMono) s_peakMono = a;
+    s_cap[s_count++] = (int16_t)mono;
   }
 
   if (s_count >= REC_MAX_SAMPLES) {

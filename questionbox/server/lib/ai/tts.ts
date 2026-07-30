@@ -15,18 +15,25 @@ export async function synthesize(text: string): Promise<Buffer> {
 
 async function synthesizeOpenAI(text: string): Promise<Buffer> {
   const openai = getOpenAI();
-  const model = process.env.TTS_MODEL || "gpt-4o-mini-tts";
+  // Default to tts-1: it has much lower latency than gpt-4o-mini-tts, which makes
+  // the box feel noticeably snappier. "nova" is warm on its own. Set TTS_MODEL to
+  // "gpt-4o-mini-tts" if you want the steerable (but slower) voice.
+  const model = process.env.TTS_MODEL || "tts-1";
   const voice = process.env.TTS_VOICE || "nova";
 
-  const res = await openai.audio.speech.create({
+  const params: Parameters<typeof openai.audio.speech.create>[0] = {
     model,
     voice,
     input: text,
     response_format: "pcm", // raw 24kHz mono 16-bit LE
-    instructions:
-      "Speak in a warm, gentle, friendly female voice, slowly and clearly, as if reading to a young child.",
-  });
+  };
+  // Only the steerable gpt-4o TTS models accept `instructions`; tts-1 rejects it.
+  if (model.includes("gpt-4o")) {
+    params.instructions =
+      "Speak in a warm, gentle, friendly female voice, slowly and clearly, as if reading to a young child.";
+  }
 
+  const res = await openai.audio.speech.create(params);
   const pcm = Buffer.from(await res.arrayBuffer());
   return encodeWav(pcm, { sampleRate: 24000, numChannels: 1 });
 }

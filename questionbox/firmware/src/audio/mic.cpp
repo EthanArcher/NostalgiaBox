@@ -15,7 +15,7 @@ static size_t   s_count = 0;
 static bool     s_recording = false;
 
 // Level metering.
-static int32_t  s_peakL = 0, s_peakR = 0, s_peakMono = 0;
+static int32_t  s_peakMono = 0;
 
 static inline int16_t clamp16(int32_t v)
 {
@@ -61,7 +61,7 @@ void Mic_Start()
 {
   AudioBus_MicFlush();
   s_count = 0;
-  s_peakL = s_peakR = s_peakMono = 0;
+  s_peakMono = 0;
   s_recording = true;
   Serial.println("[mic] recording started");
 }
@@ -70,30 +70,24 @@ void Mic_Stop()
 {
   if (!s_recording) return;
   s_recording = false;
-  Serial.printf("[mic] stopped: %u samples %.2fs | peakL=%d peakR=%d (32-bit)\n",
-                (unsigned)s_count, (float)s_count / REC_RATE, (int)s_peakL, (int)s_peakR);
+  Serial.printf("[mic] stopped: %u samples %.2fs | peak=%d (32-bit ONLY_LEFT)\n",
+                (unsigned)s_count, (float)s_count / REC_RATE, (int)s_peakMono);
 }
 
 bool Mic_Poll()
 {
   if (!s_recording) return false;
 
-  uint8_t tmp[2048];                       // 32-bit stereo frames = 8 bytes each
+  uint8_t tmp[2048];                       // 32-bit mono samples = 4 bytes each
   size_t got = AudioBus_MicRead(tmp, sizeof(tmp));
-  if (got >= 8) {
-    int frames = got / 8;
+  if (got >= 4) {
+    int n = got / 4;
     int32_t *in = (int32_t *)tmp;
-    for (int i = 0; i < frames && s_count < REC_MAX_SAMPLES; i++) {
-      int32_t L = in[i * 2];
-      int32_t R = in[i * 2 + 1];
-      int32_t aL = L < 0 ? -L : L;
-      int32_t aR = R < 0 ? -R : R;
-      if (aL > s_peakL) s_peakL = aL;
-      if (aR > s_peakR) s_peakR = aR;
-      int32_t mono = (L >> 1) + (R >> 1);    // combine channels without overflow
-      int32_t am = mono < 0 ? -mono : mono;
-      if (am > s_peakMono) s_peakMono = am;
-      s_cap[s_count++] = mono;
+    for (int i = 0; i < n && s_count < REC_MAX_SAMPLES; i++) {
+      int32_t s = in[i];
+      int32_t a = s < 0 ? -s : s;
+      if (a > s_peakMono) s_peakMono = a;
+      s_cap[s_count++] = s;
     }
   }
 

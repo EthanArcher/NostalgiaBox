@@ -88,28 +88,46 @@ void Speaker_TestBeep()
   Serial.println("[spk] test beep played");
 }
 
-// Play mono 16-bit PCM already resident in RAM. Because the data is local, the
-// I2S DMA never starves on the network -> smooth, gap-free playback. The UI is
-// pumped between chunks (DMA holds enough cushion to cover a render).
-static void play_pcm_ram(const uint8_t *data, int bytes, void (*pump)())
+// ---- Dedicated-core playback ----
+// The answer is fed to I2S by a task pinned to core 0, completely separate from
+// the UI (which runs on the Arduino loop, core 1). That way LVGL rendering can
+// never stall the audio, which is what caused the choppiness. The task consumes
+// a PSRAM buffer that the main thread fills from the network as it plays, so
+// playback can start after a small pre-buffer instead of the whole download.
+static volatile bool s_playDone = true;   // consumer finished
+static volatile bool s_dlDone   = false;  // producer finished filling
+static volatile int  s_filled   = 0;      // bytes available in s_buf
+static const uint8_t *s_buf     = nullptr;
+static int16_t s_stereo[512 * 2];         // static so the task stack stays small
+
+static void playback_task(void *)
 {
-  const int CHUNK = 512;                 // mono samples per write
-  int16_t stereo[CHUNK * 2];
-  const int16_t *mono = (const int16_t *)data;
-  int total = bytes / 2;
-  int i = 0, sinceLastPump = 0;
-  while (i < total) {
-    int n = (total - i) < CHUNK ? (total - i) : CHUNK;
-    for (int k = 0; k < n; k++) {
-      int16_t v = apply_gain(mono[i + k]);
-      stereo[k * 2] = v;
-      stereo[k * 2 + 1] = v;
+  int pos = 0;                            // bytes already played
+  for (;;) {
+    int filled = s_filled;
+    int avail = filled - pos;
+    if (avail < 2) {
+      if (s_dlDone && pos >= filled) break;
+      vTaskDelay(1);                       // wait for the producer to catch up
+      continue;
     }
-    AudioBus_SpeakerWrite((uint8_t *)stereo, n * 2 * sizeof(int16_t));
-    i += n;
-    sinceLastPump += n;
-    if (pump && sinceLastPump >= 1024) { pump(); sinceLastPump = 0; }
+    int nbytes = avail;
+    if (nbytes > (int)sizeof(s_stereo) / 2) nbytes = (int)sizeof(s_stereo) / 2;
+    nbytes &= ~0x1;
+    int nsamp = nbytes / 2;
+    const int16_t *mono = (const int16_t *)(s_buf + pos);
+    for (int k = 0; k < nsamp; k++) {
+      int16_t v = apply_gain(mono[k]);
+      s_stereo[k * 2] = v;
+      s_stereo[k * 2 + 1] = v;
+    }
+    AudioBus_SpeakerWrite((uint8_t *)s_stereo, nsamp * 2 * sizeof(int16_t));
+    pos += nbytes;
   }
+  delay(120);                              // let the DMA tail drain
+  AudioBus_SetSampleRate(16000);           // hand the bus back to the mic
+  s_playDone = true;
+  vTaskDelete(nullptr);
 }
 
 // Direct streaming fallback (used only if buffering isn't possible). Prone to
@@ -137,6 +155,32 @@ static void play_stream(Stream &s, int dataRemaining, void (*pump)())
   }
 }
 
+// How much to pre-buffer before starting playback (~0.8s at 24 kHz/16-bit mono).
+// Big enough to ride out network jitter, small enough to start quickly.
+#define PREBUF_BYTES (40 * 1024)
+
+// Fill s_buf from the stream, up to `limit` total bytes. Returns bytes now held.
+static int download_more(Stream &s, uint8_t *buf, int have, int limit,
+                         int dataLen, void (*pump)())
+{
+  uint32_t stall = millis() + 5000;
+  while (have < limit && have < dataLen) {
+    int want = dataLen - have;
+    if (want > 4096) want = 4096;
+    int n = s.readBytes((char *)(buf + have), want);
+    if (n > 0) {
+      have += n;
+      s_filled = have;
+      stall = millis() + 5000;
+    } else {
+      if (pump) pump();
+      delay(2);
+      if (millis() > stall) break;         // network went quiet - give up
+    }
+  }
+  return have;
+}
+
 void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)(), void (*onAudioStart)())
 {
   uint8_t header[44];
@@ -152,25 +196,38 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)(), void (*onA
   uint32_t wavRate = *(uint32_t *)(header + 24);
   int dataLen = (contentLen > 44) ? (contentLen - 44) : -1;
 
-  // Preferred path: pull the entire answer into PSRAM first (UI shows THINKING),
-  // then play it back smoothly with no network in the audio loop.
+  // Preferred path: pre-buffer a little, then play on a dedicated core while the
+  // rest downloads in parallel. Smooth (UI can't starve audio) AND quick to start.
   if (dataLen > 0 && dataLen <= MAX_BUFFERED_BYTES) {
     uint8_t *buf = (uint8_t *)heap_caps_malloc(dataLen, MALLOC_CAP_SPIRAM);
     if (buf) {
-      int got = read_exact(s, buf, dataLen, pump);
+      s_buf = buf;
+      s_filled = 0;
+      s_dlDone = false;
+      s_playDone = false;
+
+      int prebuf = PREBUF_BYTES < dataLen ? PREBUF_BYTES : dataLen;
+      int have = download_more(s, buf, 0, prebuf, dataLen, pump);
+
       if (wavRate >= 8000 && wavRate <= 48000) AudioBus_SetSampleRate(wavRate);
-      if (onAudioStart) onAudioStart();           // start the mouth when sound starts
-      play_pcm_ram(buf, got, pump);
+      if (onAudioStart) onAudioStart();     // mouth starts as sound starts
+      xTaskCreatePinnedToCore(playback_task, "spkplay", 3072, nullptr, 6, nullptr, 0);
+
+      // Keep filling the buffer (pumping the UI) until the whole answer is in.
+      have = download_more(s, buf, have, dataLen, dataLen, pump);
+      s_filled = have;
+      s_dlDone = true;
+
+      while (!s_playDone) { if (pump) pump(); delay(5); }
       heap_caps_free(buf);
-      delay(120);                                  // let the DMA tail drain
-      AudioBus_SetSampleRate(16000);               // hand the bus back to the mic
-      Serial.printf("[spk] played %d bytes (buffered)\n", got);
+      s_buf = nullptr;
+      Serial.printf("[spk] played %d bytes (prebuffered, dedicated core)\n", have);
       return;
     }
     Serial.println("[spk] PSRAM buffer alloc failed - streaming instead");
   }
 
-  // Fallback: stream directly.
+  // Fallback: stream directly (synchronous).
   if (wavRate >= 8000 && wavRate <= 48000) AudioBus_SetSampleRate(wavRate);
   if (onAudioStart) onAudioStart();
   play_stream(s, (dataLen > 0) ? dataLen : INT32_MAX, pump);

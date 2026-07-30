@@ -1,22 +1,18 @@
 /*****************************************************************************
- * The WonderBox face — a cute cartoon character.
+ * The WonderBox face — a cute cartoon character on a blue background.
  *
- * Design (matches the "big-eyes + open smile" cartoon reference):
- *   - two big white eyes with bold outlines and black pupils that wander + blink
- *   - a friendly OPEN mouth: black cavity, a white row of teeth on top, and a
- *     pink tongue at the bottom. While speaking, the mouth opens and closes.
- *   - a soft, flowing "Siri-style" glow around the round edge while it is
- *     listening / thinking / speaking.
+ * Two looks, matching the reference art:
+ *   SITTING STILL (idle/listening/thinking):
+ *       two big white eyes with black pupils that wander + blink, and a small
+ *       gentle smile.
+ *   ANSWERING (speaking):
+ *       happy closed "∩ ∩" eyes and an open black mouth with a pink tongue that
+ *       opens and closes as it talks.
  *
- * Per-state looks:
- *   IDLE      calm happy face, eyes wander + blink, mouth softly open
- *   LISTENING big open smile + bright fast flowing edge
- *   THINKING  eyes glance up + slow dim edge, smaller mouth
- *   SPEAKING  mouth opens/closes like talking + medium flowing edge
- *   SPELLING  one big letter at a time
+ *   SPELLING shows one big letter at a time.
  *
- * Everything is drawn with LVGL primitives so it stays crisp. Only moving parts
- * update each frame.
+ * A soft flowing edge glow appears only while listening / thinking (feedback
+ * that it's busy); the idle and speaking faces are clean, like the reference.
  *****************************************************************************/
 #include "face.h"
 #include <Arduino.h>
@@ -25,36 +21,36 @@
 #include <ctype.h>
 
 // ---- Palette ----
-#define COL_BG      0xFFF3E0   // warm cream
-#define COL_OUTLINE 0x2B2B33   // bold cartoon outline / pupils
+#define COL_BG      0x4C90D9   // friendly blue
+#define COL_INK     0x1E1E24   // near-black: pupils, eye arcs, smile, mouth
 #define COL_EYE     0xFFFFFF   // eye white
-#define COL_MOUTH   0x2B2B33   // open mouth cavity
-#define COL_TEETH   0xFFFFFF   // top teeth
-#define COL_TONGUE  0xFF7EA6   // pink tongue
-#define COL_LETTER  0x2E7DE1
-// Cool, Siri-like flowing edge colors
-#define COL_GLOW1   0x37D6D6
-#define COL_GLOW2   0x4AA8FF
-#define COL_GLOW3   0x8E7BFF
-#define COL_VOLTRK  0xE7DECB
-#define COL_VOLFILL 0x4AA8FF
+#define COL_TONGUE  0xEE6F9E   // pink tongue
+#define COL_LETTER  0xFFFFFF
+// Cool, Siri-like flowing edge colors (listening/thinking only)
+#define COL_GLOW1   0x9BE8FF
+#define COL_GLOW2   0xBFD4FF
+#define COL_GLOW3   0xE7C7FF
+#define COL_VOLTRK  0x3C79B8
+#define COL_VOLFILL 0xFFFFFF
 
 // ---- Geometry (screen 360x360, center 180,180) ----
-static const int EYE_D    = 98;    // eye diameter
-static const int EYE_DX   = 46;    // eye horizontal offset (they nearly touch)
-static const int EYE_DY   = -36;   // eye vertical offset from center
-static const int PUPIL_D  = 44;
-static const int MOUTH_W  = 150;
-static const int MOUTH_DY = 74;    // mouth center offset from screen center
-static const int MOUTH_MIN = 46;
-static const int MOUTH_MAX = 98;
+static const int EYE_D    = 118;   // big eyes
+static const int EYE_DX   = 52;    // horizontal offset (eyes overlap a little)
+static const int EYE_DY   = -34;
+static const int PUPIL_D  = 48;
+static const int MOUTH_W  = 148;
+static const int MOUTH_DY = 82;    // mouth center offset from screen center
+static const int MOUTH_MIN = 38;
+static const int MOUTH_MAX = 108;
 static const int EDGE_D   = 352;
 
 // ---- Objects ----
-static lv_obj_t *eye_l, *eye_r;
-static lv_obj_t *pupil_l, *pupil_r;
-static lv_obj_t *mouth, *teeth, *tongue;
-static lv_obj_t *comets[3];
+static lv_obj_t *eye_l, *eye_r;        // white eyes (still)
+static lv_obj_t *pupil_l, *pupil_r;    // pupils (still)
+static lv_obj_t *eyearc_l, *eyearc_r;  // happy closed eyes (speaking)
+static lv_obj_t *smile;                // gentle smile (still)
+static lv_obj_t *mouth, *tongue;       // open talking mouth (speaking)
+static lv_obj_t *comets[3];            // edge glow (listening/thinking)
 static lv_obj_t *vol_arc;
 static lv_obj_t *letter_lbl, *word_lbl;
 
@@ -75,7 +71,7 @@ static int spell_len = 0, spell_index = 0;
 static uint32_t spell_last_ms = 0;
 static const uint32_t SPELL_STEP_MS = 800;
 
-static lv_obj_t *make_rect(lv_obj_t *parent, uint32_t fill, uint32_t outline, int border, bool circle)
+static lv_obj_t *make_rect(lv_obj_t *parent, uint32_t fill, bool circle)
 {
   lv_obj_t *o = lv_obj_create(parent);
   lv_obj_remove_style_all(o);
@@ -84,15 +80,12 @@ static lv_obj_t *make_rect(lv_obj_t *parent, uint32_t fill, uint32_t outline, in
   lv_obj_set_style_radius(o, circle ? LV_RADIUS_CIRCLE : 0, 0);
   lv_obj_set_style_bg_color(o, lv_color_hex(fill), 0);
   lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-  if (border > 0) {
-    lv_obj_set_style_border_color(o, lv_color_hex(outline), 0);
-    lv_obj_set_style_border_width(o, border, 0);
-    lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
-  }
   return o;
 }
 
-static lv_obj_t *make_arc(lv_obj_t *parent, uint32_t color, int size, int width)
+// A stroked arc segment (used for the smile and the happy closed eyes).
+static lv_obj_t *make_arc_seg(lv_obj_t *parent, uint32_t color, int size,
+                              int width, int a0, int a1, bool rounded)
 {
   lv_obj_t *a = lv_arc_create(parent);
   lv_obj_remove_style_all(a);
@@ -101,10 +94,10 @@ static lv_obj_t *make_arc(lv_obj_t *parent, uint32_t color, int size, int width)
   lv_obj_set_size(a, size, size);
   lv_obj_center(a);
   lv_arc_set_rotation(a, 0);
-  lv_arc_set_bg_angles(a, 0, 10);
+  lv_arc_set_bg_angles(a, a0, a1);
   lv_obj_set_style_arc_color(a, lv_color_hex(color), LV_PART_MAIN);
   lv_obj_set_style_arc_width(a, width, LV_PART_MAIN);
-  lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
+  lv_obj_set_style_arc_rounded(a, rounded, LV_PART_MAIN);
   lv_obj_set_style_arc_width(a, 0, LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, LV_PART_KNOB);
   lv_obj_set_style_pad_all(a, 0, LV_PART_KNOB);
@@ -120,26 +113,25 @@ static inline void show(lv_obj_t *o, bool v)
 static void schedule_blink(uint32_t now) { blink_next_ms = now + 2400 + (esp_random() % 2600); }
 
 // Shape the open mouth by `open` (0 = nearly closed, 1 = wide open), keeping the
-// white teeth hugging the top and the pink tongue at the bottom.
+// pink tongue filling the bottom.
 static void set_mouth(float open)
 {
   if (open < 0.10f) open = 0.10f;
   if (open > 1.0f) open = 1.0f;
   int mh = MOUTH_MIN + (int)((MOUTH_MAX - MOUTH_MIN) * open);
+  int rad = mh / 2;
+  if (rad > 46) rad = 46;
 
   lv_obj_set_size(mouth, MOUTH_W, mh);
-  lv_obj_set_style_radius(mouth, mh / 2, 0);
+  lv_obj_set_style_radius(mouth, rad, 0);
   lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
 
-  int tw = MOUTH_W - 30, th = 22;
-  lv_obj_set_size(teeth, tw, th);
-  lv_obj_align(teeth, LV_ALIGN_CENTER, 0, MOUTH_DY - mh / 2 + th / 2 + 5);
-
-  int tgw = 74, tgh = (int)(mh * 0.42f);
-  if (tgh > 42) tgh = 42;
-  if (tgh < 14) tgh = 14;
+  int tgw = (int)(MOUTH_W * 0.62f);
+  int tgh = (int)(mh * 0.5f);
+  if (tgh > 46) tgh = 46;
+  if (tgh < 12) tgh = 12;
   lv_obj_set_size(tongue, tgw, tgh);
-  lv_obj_align(tongue, LV_ALIGN_CENTER, 0, MOUTH_DY + mh / 2 - tgh / 2 - 5);
+  lv_obj_align(tongue, LV_ALIGN_CENTER, 0, MOUTH_DY + mh / 2 - tgh / 2 - 3);
 }
 
 void Face_Create(void)
@@ -152,24 +144,31 @@ void Face_Create(void)
   // Edge glow (behind everything).
   const uint32_t glow_cols[3] = {COL_GLOW1, COL_GLOW2, COL_GLOW3};
   for (int i = 0; i < 3; i++) {
-    comets[i] = make_arc(scr, glow_cols[i], EDGE_D, 10);
-    lv_arc_set_bg_angles(comets[i], 0, 110);
+    comets[i] = make_arc_seg(scr, glow_cols[i], EDGE_D, 10, 0, 110, true);
   }
 
-  // Mouth group (create before eyes; eyes/pupils sit visually above).
-  mouth  = make_rect(scr, COL_MOUTH, COL_OUTLINE, 4, false);
-  teeth  = make_rect(scr, COL_TEETH, 0, 0, false);
-  lv_obj_set_style_radius(teeth, 9, 0);
-  tongue = make_rect(scr, COL_TONGUE, 0, 0, true);
-  set_mouth(0.66f);
+  // Talking mouth (speaking): black cavity + pink tongue (drawn on top).
+  mouth  = make_rect(scr, COL_INK, false);
+  tongue = make_rect(scr, COL_TONGUE, true);
+  set_mouth(0.6f);
 
-  // Big cartoon eyes: white with a bold outline, black pupils inside.
-  eye_l = make_rect(scr, COL_EYE, COL_OUTLINE, 5, true);
-  eye_r = make_rect(scr, COL_EYE, COL_OUTLINE, 5, true);
+  // Gentle smile (still): a shallow upturned arc.
+  smile = make_arc_seg(scr, COL_INK, 96, 9, 35, 145, true);
+  lv_obj_align(smile, LV_ALIGN_CENTER, 0, MOUTH_DY - 40);
+
+  // Happy closed eyes (speaking): two upward arcs "∩ ∩".
+  eyearc_l = make_arc_seg(scr, COL_INK, 92, 12, 210, 330, true);
+  eyearc_r = make_arc_seg(scr, COL_INK, 92, 12, 210, 330, true);
+  lv_obj_align(eyearc_l, LV_ALIGN_CENTER, -EYE_DX, EYE_DY + 18);
+  lv_obj_align(eyearc_r, LV_ALIGN_CENTER,  EYE_DX, EYE_DY + 18);
+
+  // Big white eyes with pupils (still).
+  eye_l = make_rect(scr, COL_EYE, true);
+  eye_r = make_rect(scr, COL_EYE, true);
   lv_obj_set_size(eye_l, EYE_D, EYE_D);
   lv_obj_set_size(eye_r, EYE_D, EYE_D);
-  pupil_l = make_rect(scr, COL_OUTLINE, 0, 0, true);
-  pupil_r = make_rect(scr, COL_OUTLINE, 0, 0, true);
+  pupil_l = make_rect(scr, COL_INK, true);
+  pupil_r = make_rect(scr, COL_INK, true);
   lv_obj_set_size(pupil_l, PUPIL_D, PUPIL_D);
   lv_obj_set_size(pupil_r, PUPIL_D, PUPIL_D);
 
@@ -180,7 +179,7 @@ void Face_Create(void)
   lv_obj_align(letter_lbl, LV_ALIGN_CENTER, 0, -18);
 
   word_lbl = lv_label_create(scr);
-  lv_obj_set_style_text_color(word_lbl, lv_color_hex(COL_OUTLINE), 0);
+  lv_obj_set_style_text_color(word_lbl, lv_color_hex(COL_LETTER), 0);
   lv_obj_set_style_text_font(word_lbl, &lv_font_montserrat_28, 0);
   lv_label_set_text(word_lbl, "");
   lv_obj_align(word_lbl, LV_ALIGN_CENTER, 0, 70);
@@ -215,26 +214,30 @@ void Face_SetState(WbState state)
   current = state;
   Serial.printf("[face] state -> %s\n", wb_state_name(state));
 
-  const bool face   = (state != WB_SPELLING);
   const bool listen = (state == WB_LISTENING);
   const bool think  = (state == WB_THINKING);
   const bool speak  = (state == WB_SPEAKING);
   const bool spell  = (state == WB_SPELLING);
-  const bool glow   = (listen || think || speak);
+  const bool rest   = (state == WB_IDLE || listen || think);  // "sitting still" look
+  const bool glow   = (listen || think);
 
-  show(eye_l, face);
-  show(eye_r, face);
-  show(pupil_l, face);
-  show(pupil_r, face);
-  show(mouth, face);
-  show(teeth, face);
-  show(tongue, face);
+  // Still look: white eyes + pupils + smile.
+  show(eye_l, rest);
+  show(eye_r, rest);
+  show(pupil_l, rest);
+  show(pupil_r, rest);
+  show(smile, rest);
+  // Answering look: happy closed eyes + open mouth + tongue.
+  show(eyearc_l, speak);
+  show(eyearc_r, speak);
+  show(mouth, speak);
+  show(tongue, speak);
+
   for (int i = 0; i < 3; i++) show(comets[i], glow);
   show(letter_lbl, spell);
   show(word_lbl, spell);
 
-  // A static happy mouth per state; SPEAKING animates it in Face_Tick.
-  if (face && !speak) set_mouth(listen ? 0.95f : think ? 0.5f : 0.66f);
+  if (speak) set_mouth(0.5f);
 
   uint32_t now = lv_tick_get();
   blink_start_ms = 0;
@@ -296,7 +299,6 @@ static void update_gaze(uint32_t now, bool wander)
   gaze_cy += (gaze_ty - gaze_cy) * 0.12f;
 }
 
-// Position eyes (white) and pupils. `open` (from blink) squashes them shut.
 static void place_eyes(float open)
 {
   int eh = (int)(EYE_D * open);
@@ -311,7 +313,7 @@ static void place_eyes(float open)
   show(pupil_r, pv);
   if (pv) {
     int px = (int)gaze_cx;
-    int py = (int)gaze_cy + 6;                 // slight downward gaze = cuter
+    int py = (int)gaze_cy + 6;
     int ph = (int)(PUPIL_D * open);
     if (ph < 6) ph = 6;
     lv_obj_set_size(pupil_l, PUPIL_D, ph);
@@ -361,10 +363,7 @@ void Face_Tick(void)
       break;
 
     case WB_SPEAKING: {
-      update_gaze(now, true);
-      place_eyes(blink_factor(now));
-      spin_edge(t * 130.0f, 190);
-      // Natural-looking talking: two rates combined for the mouth open amount.
+      // Happy closed eyes stay put; the mouth opens/closes like talking.
       float m = 0.55f + 0.30f * sinf(t * 13.0f) + 0.15f * sinf(t * 7.0f);
       set_mouth(m);
       break;

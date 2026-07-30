@@ -15,23 +15,28 @@
 #include <ESP_I2S.h>
 
 static I2SClass i2s;
+static bool s_ok = false;
 
 void setup() {
   Serial.begin(115200);
   delay(600);
-  Serial.println("\n=== WonderBox MIC TEST (ESP_I2S) ===");
+  Serial.println("\n=== WonderBox MIC TEST (ESP_I2S, no PSRAM) ===");
 
   // SDOUT = -1 (we only receive), MCLK = -1 (not needed for this mic).
   i2s.setPins(15 /*BCK*/, 2 /*WS*/, -1 /*SDOUT*/, 39 /*DIN*/, -1 /*MCLK*/);
   i2s.setTimeout(200);
-  if (!i2s.begin(I2S_MODE_STD, 16000, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) {
-    Serial.println("ERROR: i2s.begin failed");
-  } else {
-    Serial.println("Mic started. Talk into the mic and watch 'mic peak' below.");
-  }
+  s_ok = i2s.begin(I2S_MODE_STD, 16000, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
+  Serial.println(s_ok ? "Mic started OK. Talk into it and watch 'mic peak'."
+                      : "ERROR: i2s.begin FAILED");
 }
 
 void loop() {
+  if (!s_ok) {
+    static uint32_t t = 0;
+    if (millis() - t > 1000) { t = millis(); Serial.println("mic begin FAILED - driver did not start"); }
+    return;
+  }
+
   static uint8_t buf[2048];
   int n = i2s.readBytes((char *)buf, sizeof(buf));
   if (n <= 0) return;

@@ -90,7 +90,9 @@ size_t AudioBus_MicRead(void *buf, size_t len)
 {
   if (!s_inited) return 0;
   size_t got = 0;
-  i2s_read(AUDIO_PORT, buf, len, &got, pdMS_TO_TICKS(100));
+  // Short wait: the main loop calls this every iteration, and a long block here
+  // would make the "tap again to stop" feel laggy. 20 ms keeps taps snappy.
+  i2s_read(AUDIO_PORT, buf, len, &got, pdMS_TO_TICKS(20));
   return got;
 }
 

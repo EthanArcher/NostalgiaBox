@@ -74,7 +74,7 @@ static bool init_spk_codec(void)
     Serial.println("[codec] ES8311 init FAILED");
     return false;
   }
-  es8311_voice_volume_set(s_es8311, 80, NULL);
+  es8311_voice_volume_set(s_es8311, 60, NULL);  // codec base level; app gain rides on top
   es8311_microphone_config(s_es8311, false);   // don't use ES8311's own mic
   Serial.println("[codec] ES8311 speaker configured @24kHz");
   return true;

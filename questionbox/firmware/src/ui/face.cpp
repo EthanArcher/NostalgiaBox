@@ -31,6 +31,7 @@
 #define COL_GLOW3   0x8E7BFF  // indigo
 #define COL_VOLTRK  0xE7DECB  // volume bar track
 #define COL_VOLFILL 0x4AA8FF  // volume bar fill
+#define COL_MOUTH   0x8A4A5A  // soft rose mouth interior (shows when talking)
 
 // ---- Geometry (center 180,180) ----
 static const int EYE_D    = 60;
@@ -126,9 +127,10 @@ void Face_Create(void)
   // Smile arc (bottom curve of a circle = a happy smile).
   smile = make_arc(scr, COL_INK, 96, 12);
 
-  // Talking mouth (open/close during speech).
-  talk = make_blob(scr, COL_INK, LV_OPA_COVER);
-  lv_obj_set_size(talk, 78, 26);
+  // Talking mouth: a soft rose oval that opens and closes over the smile while
+  // speaking, so the face looks like it's happily talking.
+  talk = make_blob(scr, COL_MOUTH, LV_OPA_COVER);
+  lv_obj_set_size(talk, 58, 10);
   lv_obj_align(talk, LV_ALIGN_CENTER, 0, MOUTH_DY);
 
   letter_lbl = lv_label_create(scr);
@@ -171,12 +173,22 @@ WbState Face_GetState(void) { return current; }
 // Position the smile arc. `wide` = broader, happier smile.
 static void set_smile(bool wide)
 {
-  int a = wide ? 28 : 34;          // start angle
-  int b = wide ? 152 : 146;        // end angle (through 90 = bottom = smile)
+  int a = wide ? 22 : 28;          // start angle (smaller = wider, happier grin)
+  int b = wide ? 158 : 152;        // end angle (through 90 = bottom = smile)
   lv_arc_set_bg_angles(smile, a, b);
-  int size = wide ? 108 : 96;
+  int size = wide ? 112 : 100;
   lv_obj_set_size(smile, size, size);
   lv_obj_align(smile, LV_ALIGN_CENTER, 0, MOUTH_DY - size / 2 + 8);
+}
+
+// Open the talking mouth by `open` (0 = closed line, 1 = wide open).
+static void set_talk(float open)
+{
+  if (open < 0) open = 0;
+  if (open > 1) open = 1;
+  int h = (int)(8 + 24.0f * open);
+  lv_obj_set_size(talk, 58, h);
+  lv_obj_align(talk, LV_ALIGN_CENTER, 0, MOUTH_DY + 2);
 }
 
 void Face_SetState(WbState state)
@@ -193,8 +205,8 @@ void Face_SetState(WbState state)
 
   show(eye_l, face);
   show(eye_r, face);
-  show(smile, face);                  // keep smiling in every face state (incl. speaking)
-  show(talk, false);                  // retired the awkward open mouth
+  show(smile, face);                  // keep the happy smile in every face state
+  show(talk, speak);                  // moving mouth only while speaking
   for (int i = 0; i < 3; i++) show(comets[i], glow);
   show(letter_lbl, spell);
   show(word_lbl, spell);
@@ -314,12 +326,16 @@ void Face_Tick(void)
       spin_edge(t * 75.0f, 110);             // slow, gentle
       break;
 
-    case WB_SPEAKING:
-      // Stay smiling and lively while talking: eyes look around, edge flows.
+    case WB_SPEAKING: {
+      // Happy talking: smile stays, mouth opens/closes, eyes wander, edge flows.
       update_gaze(now, true);
       place_eyes(blink_factor(now));
       spin_edge(t * 130.0f, 190);
+      // Two overlapping rates make the flapping feel like natural speech.
+      float m = 0.5f + 0.35f * sinf(t * 15.0f) + 0.15f * sinf(t * 6.3f);
+      set_talk(m);
       break;
+    }
 
     case WB_SPELLING:
       if (spell_len > 0 && now - spell_last_ms >= SPELL_STEP_MS) {

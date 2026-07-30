@@ -41,7 +41,7 @@ static uint32_t g_last_activity = 0;
 static bool     g_asleep = false;
 
 // ---- Volume (software) ----
-static int      g_volume = 70;           // 0..100
+static int      g_volume = 55;           // 0..100
 static uint32_t g_last_gesture_ms = 0;
 
 // ---- BOOT button (GPIO0) as a volume control ----
@@ -105,15 +105,21 @@ static void stop_and_send()
   xTaskCreatePinnedToCore(ask_task, "ask", 16384, nullptr, 4, nullptr, 0);
 }
 
+static void set_speaking_cb() { Face_SetState(WB_SPEAKING); }
+
 static void play_answer()
 {
-  if (g_ans.isSpelling && g_ans.spellWord.length() > 0) {
-    Face_ShowSpelling(g_ans.spellWord.c_str());
-  } else {
-    Face_SetState(WB_SPEAKING);
-  }
   Stream *body = WonderClient_GetStream();
-  if (body) Speaker_PlayWavStream(*body, WonderClient_GetLength(), pump_ui);
+  int len = WonderClient_GetLength();
+  if (g_ans.isSpelling && g_ans.spellWord.length() > 0) {
+    Face_ShowSpelling(g_ans.spellWord.c_str());        // letters stay up during audio
+    if (body) Speaker_PlayWavStream(*body, len, pump_ui, nullptr);
+  } else {
+    // Stay THINKING while the answer downloads; the mouth starts talking the
+    // instant audible playback begins (set_speaking_cb).
+    if (body) Speaker_PlayWavStream(*body, len, pump_ui, set_speaking_cb);
+    else Face_SetState(WB_SPEAKING);
+  }
   WonderClient_End();
   go_idle();
 }
@@ -146,7 +152,7 @@ static void tap_event_cb(lv_event_t *e)
     wake_up();
     return;
   }
-  if (millis() - g_last_gesture_ms < 500) return;  // ignore the click that ends a swipe
+  if (millis() - g_last_gesture_ms < 300) return;  // ignore the click that ends a swipe
   handle_tap();
 }
 

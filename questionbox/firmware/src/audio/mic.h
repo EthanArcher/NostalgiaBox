@@ -2,8 +2,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Records mono 16 kHz / 16-bit audio from the board's I2S MEMS microphone into
-// a PSRAM buffer, and hands back a ready-to-POST WAV. PUSH-TO-TALK only.
+// Records mono 16 kHz / 16-bit audio from the board's ES7210 mic codec (16-bit
+// stereo frames, downmixed to mono) into a PSRAM buffer, and hands back a
+// ready-to-POST WAV. PUSH-TO-TALK only.
 
 bool Mic_Begin();
 

@@ -59,6 +59,7 @@ static int read_exact(Stream &s, uint8_t *buf, int want, void (*pump)())
 void Speaker_TestBeep()
 {
   const int rate = 24000;
+  AudioBus_SetSampleRate(rate);      // clock the speaker codec for playback
   const int total = rate / 2;        // 0.5 seconds
   int16_t buf[256 * 2];
   int done = 0;
@@ -90,6 +91,11 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
     return;
   }
 
+  // Match the bus clock to the WAV's sample rate so playback is at the right
+  // pitch/speed (the server sends 24 kHz; the mic runs at 16 kHz).
+  uint32_t wavRate = *(uint32_t *)(header + 24);
+  if (wavRate >= 8000 && wavRate <= 48000) AudioBus_SetSampleRate(wavRate);
+
   int dataRemaining = (contentLen > 44) ? (contentLen - 44) : INT32_MAX;
 
   int16_t mono[512];
@@ -115,5 +121,6 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)())
 
     if (pump) pump();
   }
+  AudioBus_SetSampleRate(16000);     // hand the bus back to the mic
   Serial.println("[spk] playback done");
 }

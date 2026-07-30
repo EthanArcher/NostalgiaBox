@@ -1,11 +1,11 @@
 #pragma once
 #include <Arduino.h>
 
-// Plays answer audio out of the PCM5101 speaker over I2S.
+// Plays answer audio out of the ES8311 speaker codec over the shared I2S bus.
 //
 // Answer audio is standardized as 16-bit PCM WAV, MONO, 24 kHz (what the server
-// produces). The 44-byte WAV header is skipped; mono samples are duplicated to
-// both stereo channels for the DAC.
+// produces). The 44-byte WAV header is read to pick the playback rate; mono
+// samples are duplicated to both stereo channels for the codec.
 
 bool Speaker_Begin();
 

@@ -40,7 +40,7 @@ export function encodeWav(pcm: Buffer, { sampleRate, numChannels }: WavParams): 
  * placeholder answer audio, purely to prove the speaker path end-to-end.
  * Replaced by real text-to-speech in Stage 4.
  */
-export function generateChimeWav(sampleRate = 24000): Buffer {
+export function generateChimeWav(sampleRate = 16000): Buffer {
   const notes = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
   const noteDur = 0.16; // seconds per note
   const total = notes.length * noteDur;

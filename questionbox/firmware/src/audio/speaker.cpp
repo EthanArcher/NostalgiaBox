@@ -65,8 +65,8 @@ static int read_exact(Stream &s, uint8_t *buf, int want, void (*pump)())
 
 void Speaker_TestBeep()
 {
-  const int rate = 24000;
-  AudioBus_SetSampleRate(rate);      // clock the speaker codec for playback
+  const int rate = 16000;            // whole audio path runs at 16 kHz now
+  AudioBus_SetSampleRate(rate);
   const int total = rate / 2;        // 0.5 seconds
   int16_t buf[256 * 2];
   int done = 0;
@@ -101,7 +101,6 @@ static volatile int  s_filled   = 0;      // bytes downloaded so far
 static uint8_t      *s_buf      = nullptr;
 static int           s_total    = 0;      // total content length (WAV header + PCM)
 static Stream       *s_stream   = nullptr;
-static uint32_t      s_rate     = 24000;
 static void        (*s_onStart)() = nullptr;
 static int16_t s_stereo[512 * 2];         // static so the task stacks stay small
 
@@ -116,6 +115,11 @@ static void producer_task(void *)
   while (got < s_total) {
     int want = s_total - got;
     if (want > 4096) want = 4096;
+    // Read only what's already arrived so we never block waiting for a full
+    // chunk (that would let the consumer catch up and stutter).
+    int av = s_stream->available();
+    if (av <= 0) { vTaskDelay(1); if (millis() > stall) break; continue; }
+    if (want > av) want = av;
     int n = s_stream->readBytes((char *)(s_buf + got), want);
     if (n > 0) { got += n; s_filled = got; stall = millis() + 6000; }
     else { vTaskDelay(1); if (millis() > stall) break; }
@@ -126,18 +130,13 @@ static void producer_task(void *)
 
 static void consumer_task(void *)
 {
-  // Wait for the 44-byte WAV header, then match the bus clock to its sample rate.
-  while (s_filled < 44 && !s_dlDone) vTaskDelay(1);
-  if (s_filled >= 44) {
-    uint32_t r = *(uint32_t *)(s_buf + 24);
-    if (r >= 8000 && r <= 48000) s_rate = r;
-  }
+  // The whole audio path is fixed at 16 kHz now, so we don't retune the bus off
+  // the WAV header — we just skip the 44-byte header and play the PCM.
   // Small pre-buffer so a first-packet hiccup can't clip the opening word.
   int prebuf = 44 + PREBUF_BYTES;
   if (prebuf > s_total) prebuf = s_total;
   while (s_filled < prebuf && !s_dlDone) vTaskDelay(1);
 
-  AudioBus_SetSampleRate(s_rate);
   if (s_onStart) s_onStart();              // start the mouth as sound starts
 
   int pos = 44;                            // skip the WAV header
@@ -163,7 +162,6 @@ static void consumer_task(void *)
     pos += nbytes;
   }
   delay(120);                              // let the DMA tail drain
-  AudioBus_SetSampleRate(16000);           // hand the bus back to the mic
   s_playDone = true;
   vTaskDelete(nullptr);
 }
@@ -206,7 +204,6 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)(), void (*onA
       s_filled = 0;
       s_dlDone = false;
       s_playDone = false;
-      s_rate = 24000;
       s_onStart = onAudioStart;
       // Consumer runs at a slightly higher priority so feeding I2S always wins.
       xTaskCreatePinnedToCore(producer_task, "spkdl",  4096, nullptr, 5, nullptr, 0);
@@ -230,11 +227,8 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)(), void (*onA
     Serial.println("[spk] not a WAV stream");
     return;
   }
-  uint32_t wavRate = *(uint32_t *)(header + 24);
   int dataLen = (contentLen > 44) ? (contentLen - 44) : -1;
-  if (wavRate >= 8000 && wavRate <= 48000) AudioBus_SetSampleRate(wavRate);
   if (onAudioStart) onAudioStart();
   play_stream(s, (dataLen > 0) ? dataLen : INT32_MAX, pump);
-  AudioBus_SetSampleRate(16000);
   Serial.println("[spk] playback done (streamed)");
 }

@@ -36,15 +36,16 @@
 // ---- Geometry (screen 360x360, center 180,180) ----
 static const int EYE_D    = 118;   // big eyes
 static const int EYE_DX   = 52;    // horizontal offset (eyes overlap a little)
-static const int EYE_DY   = -34;
+static const int EYE_DY   = -30;   // (resting eyes sit a touch lower, nearer the mouth)
 static const int PUPIL_D  = 48;
-static const int MOUTH_DY = 70;    // mouth center offset from screen center
-// The talking mouth grows in BOTH width and height (a small round "o" that
-// opens into a big rounded shape), matching the reference art.
-static const int MOUTH_W_MIN = 66;
-static const int MOUTH_W_MAX = 152;
-static const int MOUTH_H_MIN = 30;
-static const int MOUTH_H_MAX = 104;
+static const int SMILE_DY = 20;    // resting smile offset (kept close under the eyes)
+static const int MOUTH_DY = 66;    // talking-mouth center offset from screen center
+// The talking mouth is WIDE and fairly flat, opening mostly in height, with a
+// big pink tongue filling the bottom half (matches the reference art).
+static const int MOUTH_W_MIN = 96;
+static const int MOUTH_W_MAX = 176;
+static const int MOUTH_H_MIN = 28;
+static const int MOUTH_H_MAX = 92;
 static const int EDGE_D   = 352;
 
 // ---- Objects ----
@@ -115,26 +116,27 @@ static inline void show(lv_obj_t *o, bool v)
 
 static void schedule_blink(uint32_t now) { blink_next_ms = now + 2400 + (esp_random() % 2600); }
 
-// Shape the open mouth by `open` (0 = small round mouth, 1 = wide open), keeping
-// the pink tongue nestled in the bottom.
+// Shape the open mouth by `open` (0 = small wide mouth, 1 = wide open), with a
+// big pink tongue filling the bottom half — a wide, flat, rounded cartoon mouth.
 static void set_mouth(float open)
 {
   if (open < 0.08f) open = 0.08f;
   if (open > 1.0f) open = 1.0f;
   int w = MOUTH_W_MIN + (int)((MOUTH_W_MAX - MOUTH_W_MIN) * open);
   int h = MOUTH_H_MIN + (int)((MOUTH_H_MAX - MOUTH_H_MIN) * open);
-  int rad = (w < h ? w : h) / 2;         // as round as possible = oval/pill
 
   lv_obj_set_size(mouth, w, h);
-  lv_obj_set_style_radius(mouth, rad, 0);
+  lv_obj_set_style_radius(mouth, h / 2, 0);   // rounded ends, wide flat shape
   lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
 
-  int tgw = (int)(w * 0.72f);
-  int tgh = (int)(h * 0.55f);
-  if (tgh > 46) tgh = 46;
+  // Big tongue: ~80% of the width, filling roughly the bottom 60% of the mouth,
+  // leaving a thin black rim at the very bottom and sides.
+  int tgw = (int)(w * 0.80f);
+  int tgh = (int)(h * 0.62f);
   if (tgh < 10) tgh = 10;
   lv_obj_set_size(tongue, tgw, tgh);
-  lv_obj_align(tongue, LV_ALIGN_CENTER, 0, MOUTH_DY + h / 2 - tgh / 2 - 4);
+  lv_obj_set_style_radius(tongue, tgh / 2, 0);
+  lv_obj_align(tongue, LV_ALIGN_CENTER, 0, MOUTH_DY + h / 2 - tgh / 2 - 5);
 }
 
 void Face_Create(void)
@@ -155,9 +157,9 @@ void Face_Create(void)
   tongue = make_rect(scr, COL_TONGUE, true);
   set_mouth(0.6f);
 
-  // Gentle smile (still): a small shallow upturned arc.
+  // Gentle smile (still): a small shallow upturned arc, kept close under the eyes.
   smile = make_arc_seg(scr, COL_INK, 74, 8, 40, 140, true);
-  lv_obj_align(smile, LV_ALIGN_CENTER, 0, MOUTH_DY - 18);
+  lv_obj_align(smile, LV_ALIGN_CENTER, 0, SMILE_DY);
 
   // Happy closed eyes (speaking): two rounded upward humps "∩ ∩".
   eyearc_l = make_arc_seg(scr, COL_INK, 96, 13, 200, 340, true);
@@ -241,6 +243,10 @@ void Face_SetState(WbState state)
   show(word_lbl, spell);
 
   if (speak) set_mouth(0.5f);
+
+  // Force a clean full redraw so nothing from the previous state can linger
+  // (e.g. the edge glow after answering, or two mouths overlapping mid-switch).
+  lv_obj_invalidate(lv_scr_act());
 
   uint32_t now = lv_tick_get();
   blink_start_ms = 0;

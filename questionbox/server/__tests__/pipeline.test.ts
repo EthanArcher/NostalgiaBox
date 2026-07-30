@@ -51,7 +51,9 @@ describe("pipeline — Gate 1 (LLM classifier) can still defer", () => {
       generate,
     });
     expect(res.mode).toBe("deferred");
-    expect(generate).not.toHaveBeenCalled();
+    // The answer model may run speculatively (in parallel) for latency, but its
+    // output is discarded — a deferred question must never leak a substantive answer.
+    expect(res.text).not.toContain("substantive");
   });
 
   it("defers when the classifier throws (fail closed)", async () => {

@@ -38,10 +38,13 @@ static const int EYE_D    = 118;   // big eyes
 static const int EYE_DX   = 52;    // horizontal offset (eyes overlap a little)
 static const int EYE_DY   = -34;
 static const int PUPIL_D  = 48;
-static const int MOUTH_W  = 148;
-static const int MOUTH_DY = 82;    // mouth center offset from screen center
-static const int MOUTH_MIN = 38;
-static const int MOUTH_MAX = 108;
+static const int MOUTH_DY = 70;    // mouth center offset from screen center
+// The talking mouth grows in BOTH width and height (a small round "o" that
+// opens into a big rounded shape), matching the reference art.
+static const int MOUTH_W_MIN = 66;
+static const int MOUTH_W_MAX = 152;
+static const int MOUTH_H_MIN = 30;
+static const int MOUTH_H_MAX = 104;
 static const int EDGE_D   = 352;
 
 // ---- Objects ----
@@ -112,26 +115,26 @@ static inline void show(lv_obj_t *o, bool v)
 
 static void schedule_blink(uint32_t now) { blink_next_ms = now + 2400 + (esp_random() % 2600); }
 
-// Shape the open mouth by `open` (0 = nearly closed, 1 = wide open), keeping the
-// pink tongue filling the bottom.
+// Shape the open mouth by `open` (0 = small round mouth, 1 = wide open), keeping
+// the pink tongue nestled in the bottom.
 static void set_mouth(float open)
 {
-  if (open < 0.10f) open = 0.10f;
+  if (open < 0.08f) open = 0.08f;
   if (open > 1.0f) open = 1.0f;
-  int mh = MOUTH_MIN + (int)((MOUTH_MAX - MOUTH_MIN) * open);
-  int rad = mh / 2;
-  if (rad > 46) rad = 46;
+  int w = MOUTH_W_MIN + (int)((MOUTH_W_MAX - MOUTH_W_MIN) * open);
+  int h = MOUTH_H_MIN + (int)((MOUTH_H_MAX - MOUTH_H_MIN) * open);
+  int rad = (w < h ? w : h) / 2;         // as round as possible = oval/pill
 
-  lv_obj_set_size(mouth, MOUTH_W, mh);
+  lv_obj_set_size(mouth, w, h);
   lv_obj_set_style_radius(mouth, rad, 0);
   lv_obj_align(mouth, LV_ALIGN_CENTER, 0, MOUTH_DY);
 
-  int tgw = (int)(MOUTH_W * 0.62f);
-  int tgh = (int)(mh * 0.5f);
+  int tgw = (int)(w * 0.72f);
+  int tgh = (int)(h * 0.55f);
   if (tgh > 46) tgh = 46;
-  if (tgh < 12) tgh = 12;
+  if (tgh < 10) tgh = 10;
   lv_obj_set_size(tongue, tgw, tgh);
-  lv_obj_align(tongue, LV_ALIGN_CENTER, 0, MOUTH_DY + mh / 2 - tgh / 2 - 3);
+  lv_obj_align(tongue, LV_ALIGN_CENTER, 0, MOUTH_DY + h / 2 - tgh / 2 - 4);
 }
 
 void Face_Create(void)
@@ -152,15 +155,15 @@ void Face_Create(void)
   tongue = make_rect(scr, COL_TONGUE, true);
   set_mouth(0.6f);
 
-  // Gentle smile (still): a shallow upturned arc.
-  smile = make_arc_seg(scr, COL_INK, 96, 9, 35, 145, true);
-  lv_obj_align(smile, LV_ALIGN_CENTER, 0, MOUTH_DY - 40);
+  // Gentle smile (still): a small shallow upturned arc.
+  smile = make_arc_seg(scr, COL_INK, 74, 8, 40, 140, true);
+  lv_obj_align(smile, LV_ALIGN_CENTER, 0, MOUTH_DY - 18);
 
-  // Happy closed eyes (speaking): two upward arcs "∩ ∩".
-  eyearc_l = make_arc_seg(scr, COL_INK, 92, 12, 210, 330, true);
-  eyearc_r = make_arc_seg(scr, COL_INK, 92, 12, 210, 330, true);
-  lv_obj_align(eyearc_l, LV_ALIGN_CENTER, -EYE_DX, EYE_DY + 18);
-  lv_obj_align(eyearc_r, LV_ALIGN_CENTER,  EYE_DX, EYE_DY + 18);
+  // Happy closed eyes (speaking): two rounded upward humps "∩ ∩".
+  eyearc_l = make_arc_seg(scr, COL_INK, 96, 13, 200, 340, true);
+  eyearc_r = make_arc_seg(scr, COL_INK, 96, 13, 200, 340, true);
+  lv_obj_align(eyearc_l, LV_ALIGN_CENTER, -EYE_DX, EYE_DY + 22);
+  lv_obj_align(eyearc_r, LV_ALIGN_CENTER,  EYE_DX, EYE_DY + 22);
 
   // Big white eyes with pupils (still).
   eye_l = make_rect(scr, COL_EYE, true);

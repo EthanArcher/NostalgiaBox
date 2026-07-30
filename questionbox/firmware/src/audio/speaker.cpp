@@ -88,27 +88,65 @@ void Speaker_TestBeep()
   Serial.println("[spk] test beep played");
 }
 
-// ---- Dedicated-core playback ----
-// The answer is fed to I2S by a task pinned to core 0, completely separate from
-// the UI (which runs on the Arduino loop, core 1). That way LVGL rendering can
-// never stall the audio, which is what caused the choppiness. The task consumes
-// a PSRAM buffer that the main thread fills from the network as it plays, so
-// playback can start after a small pre-buffer instead of the whole download.
+// ---- Dual-task playback (producer + consumer) ----
+// A "producer" task downloads the answer into PSRAM as fast as the link allows,
+// and a "consumer" task plays it to I2S. BOTH run on core 0, apart from the UI
+// (Arduino loop, core 1), so neither the network nor LVGL rendering can starve
+// the audio — that combination is what fixes the choppiness. Playback starts
+// after a small pre-buffer, so it also begins quickly. The main thread only
+// pumps the UI and waits.
 static volatile bool s_playDone = true;   // consumer finished
 static volatile bool s_dlDone   = false;  // producer finished filling
-static volatile int  s_filled   = 0;      // bytes available in s_buf
-static const uint8_t *s_buf     = nullptr;
-static int16_t s_stereo[512 * 2];         // static so the task stack stays small
+static volatile int  s_filled   = 0;      // bytes downloaded so far
+static uint8_t      *s_buf      = nullptr;
+static int           s_total    = 0;      // total content length (WAV header + PCM)
+static Stream       *s_stream   = nullptr;
+static uint32_t      s_rate     = 24000;
+static void        (*s_onStart)() = nullptr;
+static int16_t s_stereo[512 * 2];         // static so the task stacks stay small
 
-static void playback_task(void *)
+// ~0.3s head start. The producer usually outruns playback, so this stays small
+// (small pre-buffer = quicker start), but it still absorbs first-packet jitter.
+#define PREBUF_BYTES (16 * 1024)
+
+static void producer_task(void *)
 {
-  int pos = 0;                            // bytes already played
+  int got = 0;
+  uint32_t stall = millis() + 6000;
+  while (got < s_total) {
+    int want = s_total - got;
+    if (want > 4096) want = 4096;
+    int n = s_stream->readBytes((char *)(s_buf + got), want);
+    if (n > 0) { got += n; s_filled = got; stall = millis() + 6000; }
+    else { vTaskDelay(1); if (millis() > stall) break; }
+  }
+  s_dlDone = true;
+  vTaskDelete(nullptr);
+}
+
+static void consumer_task(void *)
+{
+  // Wait for the 44-byte WAV header, then match the bus clock to its sample rate.
+  while (s_filled < 44 && !s_dlDone) vTaskDelay(1);
+  if (s_filled >= 44) {
+    uint32_t r = *(uint32_t *)(s_buf + 24);
+    if (r >= 8000 && r <= 48000) s_rate = r;
+  }
+  // Small pre-buffer so a first-packet hiccup can't clip the opening word.
+  int prebuf = 44 + PREBUF_BYTES;
+  if (prebuf > s_total) prebuf = s_total;
+  while (s_filled < prebuf && !s_dlDone) vTaskDelay(1);
+
+  AudioBus_SetSampleRate(s_rate);
+  if (s_onStart) s_onStart();              // start the mouth as sound starts
+
+  int pos = 44;                            // skip the WAV header
   for (;;) {
     int filled = s_filled;
     int avail = filled - pos;
     if (avail < 2) {
       if (s_dlDone && pos >= filled) break;
-      vTaskDelay(1);                       // wait for the producer to catch up
+      vTaskDelay(1);
       continue;
     }
     int nbytes = avail;
@@ -155,34 +193,34 @@ static void play_stream(Stream &s, int dataRemaining, void (*pump)())
   }
 }
 
-// How much to pre-buffer before starting playback (~0.8s at 24 kHz/16-bit mono).
-// Big enough to ride out network jitter, small enough to start quickly.
-#define PREBUF_BYTES (40 * 1024)
-
-// Fill s_buf from the stream, up to `limit` total bytes. Returns bytes now held.
-static int download_more(Stream &s, uint8_t *buf, int have, int limit,
-                         int dataLen, void (*pump)())
-{
-  uint32_t stall = millis() + 5000;
-  while (have < limit && have < dataLen) {
-    int want = dataLen - have;
-    if (want > 4096) want = 4096;
-    int n = s.readBytes((char *)(buf + have), want);
-    if (n > 0) {
-      have += n;
-      s_filled = have;
-      stall = millis() + 5000;
-    } else {
-      if (pump) pump();
-      delay(2);
-      if (millis() > stall) break;         // network went quiet - give up
-    }
-  }
-  return have;
-}
-
 void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)(), void (*onAudioStart)())
 {
+  // Preferred path: download + play on two core-0 tasks (see above) while the UI
+  // keeps rendering on core 1. Needs a known content length to size the buffer.
+  if (contentLen > 44 && contentLen <= MAX_BUFFERED_BYTES) {
+    uint8_t *buf = (uint8_t *)heap_caps_malloc(contentLen, MALLOC_CAP_SPIRAM);
+    if (buf) {
+      s_buf = buf;
+      s_total = contentLen;
+      s_stream = &s;
+      s_filled = 0;
+      s_dlDone = false;
+      s_playDone = false;
+      s_rate = 24000;
+      s_onStart = onAudioStart;
+      // Consumer runs at a slightly higher priority so feeding I2S always wins.
+      xTaskCreatePinnedToCore(producer_task, "spkdl",  4096, nullptr, 5, nullptr, 0);
+      xTaskCreatePinnedToCore(consumer_task, "spkplay", 3072, nullptr, 6, nullptr, 0);
+      while (!s_playDone) { if (pump) pump(); delay(5); }
+      heap_caps_free(buf);
+      s_buf = nullptr;
+      Serial.printf("[spk] played %d bytes (dual-task)\n", s_filled);
+      return;
+    }
+    Serial.println("[spk] PSRAM buffer alloc failed - streaming instead");
+  }
+
+  // Fallback: read the header then stream synchronously (unknown length, etc.).
   uint8_t header[44];
   if (read_exact(s, header, 44, pump) < 44) {
     Serial.println("[spk] short WAV header");
@@ -192,42 +230,8 @@ void Speaker_PlayWavStream(Stream &s, int contentLen, void (*pump)(), void (*onA
     Serial.println("[spk] not a WAV stream");
     return;
   }
-
   uint32_t wavRate = *(uint32_t *)(header + 24);
   int dataLen = (contentLen > 44) ? (contentLen - 44) : -1;
-
-  // Preferred path: pre-buffer a little, then play on a dedicated core while the
-  // rest downloads in parallel. Smooth (UI can't starve audio) AND quick to start.
-  if (dataLen > 0 && dataLen <= MAX_BUFFERED_BYTES) {
-    uint8_t *buf = (uint8_t *)heap_caps_malloc(dataLen, MALLOC_CAP_SPIRAM);
-    if (buf) {
-      s_buf = buf;
-      s_filled = 0;
-      s_dlDone = false;
-      s_playDone = false;
-
-      int prebuf = PREBUF_BYTES < dataLen ? PREBUF_BYTES : dataLen;
-      int have = download_more(s, buf, 0, prebuf, dataLen, pump);
-
-      if (wavRate >= 8000 && wavRate <= 48000) AudioBus_SetSampleRate(wavRate);
-      if (onAudioStart) onAudioStart();     // mouth starts as sound starts
-      xTaskCreatePinnedToCore(playback_task, "spkplay", 3072, nullptr, 6, nullptr, 0);
-
-      // Keep filling the buffer (pumping the UI) until the whole answer is in.
-      have = download_more(s, buf, have, dataLen, dataLen, pump);
-      s_filled = have;
-      s_dlDone = true;
-
-      while (!s_playDone) { if (pump) pump(); delay(5); }
-      heap_caps_free(buf);
-      s_buf = nullptr;
-      Serial.printf("[spk] played %d bytes (prebuffered, dedicated core)\n", have);
-      return;
-    }
-    Serial.println("[spk] PSRAM buffer alloc failed - streaming instead");
-  }
-
-  // Fallback: stream directly (synchronous).
   if (wavRate >= 8000 && wavRate <= 48000) AudioBus_SetSampleRate(wavRate);
   if (onAudioStart) onAudioStart();
   play_stream(s, (dataLen > 0) ? dataLen : INT32_MAX, pump);

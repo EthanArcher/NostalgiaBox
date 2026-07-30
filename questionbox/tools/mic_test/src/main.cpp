@@ -13,14 +13,42 @@
  *****************************************************************************/
 #include <Arduino.h>
 #include <ESP_I2S.h>
+#include <Wire.h>
 
 static I2SClass i2s;
 static bool s_ok = false;
+
+// Scan the I2C bus and report which audio chips are present. This tells us the
+// board revision: V1 (PCM5101 + MEMS mic) vs V2 (ES8311 + ES7210 codecs).
+static void scanI2C() {
+  Wire.begin(11 /*SDA*/, 10 /*SCL*/);
+  Serial.println("--- I2C scan ---");
+  int found = 0;
+  bool es8311 = false, es7210 = false;
+  for (uint8_t a = 1; a < 0x7F; a++) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  found 0x%02X\n", a);
+      found++;
+      if (a == 0x18) es8311 = true;                 // ES8311 codec
+      if (a == 0x40 || a == 0x41 || a == 0x42 || a == 0x43) es7210 = true; // ES7210 ADC
+    }
+  }
+  if (found == 0) Serial.println("  (no I2C devices found)");
+  if (es8311 || es7210) {
+    Serial.println(">>> This looks like a V2 board (ES8311/ES7210 codecs). The");
+    Serial.println(">>> mic/speaker need I2C codec setup - tell your assistant!");
+  } else {
+    Serial.println(">>> No audio codecs found -> looks like a V1 board (PCM5101 + MEMS mic).");
+  }
+  Serial.println("----------------");
+}
 
 void setup() {
   Serial.begin(115200);
   delay(600);
   Serial.println("\n=== WonderBox MIC TEST (ESP_I2S, no PSRAM) ===");
+  scanI2C();
 
   // SDOUT = -1 (we only receive), MCLK = -1 (not needed for this mic).
   i2s.setPins(15 /*BCK*/, 2 /*WS*/, -1 /*SDOUT*/, 39 /*DIN*/, -1 /*MCLK*/);

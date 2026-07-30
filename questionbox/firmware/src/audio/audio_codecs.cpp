@@ -26,7 +26,7 @@
 
 #define PA_ENABLE_PIN 15
 #define MIC_RATE      16000
-#define SPK_RATE      24000
+#define SPK_RATE      16000   // match the mic rate: one clock, less audio data
 #define MCLK_MULTIPLE 256
 
 static es7210_dev_handle_t s_es7210 = NULL;
@@ -68,7 +68,7 @@ static bool init_spk_codec(void)
   clk.mclk_inverted     = false;
   clk.sclk_inverted     = false;
   clk.mclk_from_mclk_pin = true;
-  clk.mclk_frequency    = SPK_RATE * MCLK_MULTIPLE;   // 6.144 MHz
+  clk.mclk_frequency    = SPK_RATE * MCLK_MULTIPLE;   // 4.096 MHz @16kHz
   clk.sample_frequency  = SPK_RATE;
   if (es8311_init(s_es8311, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) {
     Serial.println("[codec] ES8311 init FAILED");
@@ -76,7 +76,7 @@ static bool init_spk_codec(void)
   }
   es8311_voice_volume_set(s_es8311, 60, NULL);  // codec base level; app gain rides on top
   es8311_microphone_config(s_es8311, false);   // don't use ES8311's own mic
-  Serial.println("[codec] ES8311 speaker configured @24kHz");
+  Serial.println("[codec] ES8311 speaker configured @16kHz");
   return true;
 }
 

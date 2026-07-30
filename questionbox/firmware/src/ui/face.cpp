@@ -244,6 +244,10 @@ void Face_SetState(WbState state)
 
   if (speak) set_mouth(0.5f);
 
+  // Force a clean full redraw so nothing from the previous state can linger
+  // (e.g. the edge glow after answering, or two mouths overlapping mid-switch).
+  lv_obj_invalidate(lv_scr_act());
+
   uint32_t now = lv_tick_get();
   blink_start_ms = 0;
   schedule_blink(now);

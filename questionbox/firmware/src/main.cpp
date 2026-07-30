@@ -53,10 +53,18 @@ static bool     g_btn_down = false;
 static uint32_t g_btn_down_ms = 0;
 static bool     g_btn_long_fired = false;
 
+// Set by the audio (consumer) task to ask the main loop to switch the face to
+// SPEAKING. LVGL is single-threaded, so the audio task must NEVER call Face_*
+// itself — it only raises this flag, and pump_ui() (main loop) acts on it.
+static volatile bool g_want_speaking = false;
+
 static void note_activity() { g_last_activity = millis(); }
+
+static void request_speaking() { g_want_speaking = true; }
 
 static void pump_ui()
 {
+  if (g_want_speaking) { g_want_speaking = false; Face_SetState(WB_SPEAKING); }
   Lvgl_Loop();
   Face_Tick();
 }
@@ -105,19 +113,19 @@ static void stop_and_send()
   xTaskCreatePinnedToCore(ask_task, "ask", 16384, nullptr, 4, nullptr, 0);
 }
 
-static void set_speaking_cb() { Face_SetState(WB_SPEAKING); }
-
 static void play_answer()
 {
   Stream *body = WonderClient_GetStream();
   int len = WonderClient_GetLength();
+  g_want_speaking = false;
   if (g_ans.isSpelling && g_ans.spellWord.length() > 0) {
     Face_ShowSpelling(g_ans.spellWord.c_str());        // letters stay up during audio
     if (body) Speaker_PlayWavStream(*body, len, pump_ui, nullptr);
   } else {
     // Stay THINKING while the answer downloads; the mouth starts talking the
-    // instant audible playback begins (set_speaking_cb).
-    if (body) Speaker_PlayWavStream(*body, len, pump_ui, set_speaking_cb);
+    // instant audible playback begins (request_speaking flips a flag the main
+    // loop reads, so LVGL is only ever touched from the main thread).
+    if (body) Speaker_PlayWavStream(*body, len, pump_ui, request_speaking);
     else Face_SetState(WB_SPEAKING);
   }
   WonderClient_End();

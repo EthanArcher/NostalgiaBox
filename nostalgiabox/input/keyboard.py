@@ -139,11 +139,10 @@ class KeyboardBackend(InputBackend):
         # for digits, enter, power, etc. so a held button doesn't misbehave.
         from ..actions import Action
 
+        # Only allow repeats for volume keys
         if event.value == _KEY_REPEAT and input_event.action not in (
             Action.VOLUME_UP,
             Action.VOLUME_DOWN,
-            Action.CHANNEL_UP,
-            Action.CHANNEL_DOWN,
         ):
             return
         self.emit(input_event)

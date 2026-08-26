@@ -147,6 +147,17 @@ def _style(ui: UiConfig, *, size: int, alpha: int = 0) -> str:
     return tags
 
 
+def _channel_name_style(ui: UiConfig) -> str:
+    """Use a restrained phosphor bloom so longer show names stay readable."""
+    color = _hex_to_ass(ui.color)
+    tags = rf"\fn{ui.font}\b1\fs40\c{color}\1a&H00&"
+    if ui.glow:
+        tags += rf"\bord1\blur2\3c{color}\4c{_BLACK}\shad0"
+    else:
+        tags += rf"\bord1\3c{_BLACK}\shad0"
+    return tags
+
+
 # --------------------------------------------------------------------------
 # ASS builders (free functions so they are easy to unit test)
 # --------------------------------------------------------------------------
@@ -157,7 +168,7 @@ def _channel_bug_ass(number: int, name: str, ui: UiConfig) -> str:
         rf"{{\an9\pos({_IX1},{_IY0}){_style(ui, size=88)}}}CH {num}"
     )
     name_line = (
-        rf"{{\an9\pos({_IX1},{_IY0 + 104}){_style(ui, size=40)}}}{_escape(name)}"
+        rf"{{\an9\pos({_IX1},{_IY0 + 104}){_channel_name_style(ui)}}}{_escape(name)}"
     )
     return "\n".join([number_line, name_line])
 

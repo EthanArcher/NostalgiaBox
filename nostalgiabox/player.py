@@ -160,7 +160,8 @@ class MpvPlayer(Player):
             hwdec=hwdec,
             vo="gpu",
             gpu_context="drm",
-            # 4:3 shows should be pillarboxed (not stretched) inside the frame.
+            # Keep the output frame stable and let the filter below decide how
+            # source aspect ratios are fitted into it.
             keepaspect="yes",
             video_unscaled="no",
             # Hide the mouse cursor - this is a TV, not a computer.
@@ -178,13 +179,12 @@ class MpvPlayer(Player):
             # without the effect on a channel change.
             options["glsl_shaders"] = glsl_shaders
         if force_4_3:
-            # Fit ANY source into a 4:3 raster (letterboxing 16:9 with black
-            # bars), so every show - and the static/colour-bar clips - appears in
-            # the same 4:3 tube-TV frame. mpv then pillarboxes that 4:3 image on
-            # a 16:9 TV, and the CRT shader curves it.
+            # Fill a common 4:3 raster without stretching: scale up until the
+            # frame is covered, then crop excess edges. mpv then pillarboxes
+            # that 4:3 image on a 16:9 TV, and the CRT shader curves it.
             options["vf"] = (
-                "lavfi=[scale=960:720:force_original_aspect_ratio=decrease,"
-                "pad=960:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1]"
+                "lavfi=[scale=960:720:force_original_aspect_ratio=increase,"
+                "crop=960:720:(iw-ow)/2:(ih-oh)/2,setsar=1]"
             )
         if extra_options:
             options.update(extra_options)

@@ -158,6 +158,8 @@ class MpvPlayer(Player):
             # Hardware decode + a sensible video output for the Pi. gpu with the
             # drm context works headless on the Pi 4; libmpv falls back sanely.
             hwdec=hwdec,
+            vo="gpu",
+            gpu_context="drm",
             # 4:3 shows should be pillarboxed (not stretched) inside the frame.
             keepaspect="yes",
             video_unscaled="no",

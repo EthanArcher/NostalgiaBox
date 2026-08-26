@@ -302,6 +302,20 @@ Leaving out episodes per channel:
 
 Validate any changes with `nostalgiabox --check`.
 
+### Bake the CRT effect into video files
+
+If the Pi struggles with the live CRT shader, make processed copies with ffmpeg:
+
+```bash
+./scripts/bake-crt.sh /media/nostalgiabox /media/nostalgiabox-crt
+```
+
+The tool preserves the folder structure, fills the fixed 4:3 frame, adds a
+subtle curve, vignette, and scanlines, and copies the original audio tracks.
+It never overwrites the originals. Point the channel paths in `config.yaml` at
+`/media/nostalgiabox-crt/<show>` and set `crt.enabled: false` so the effect is
+not applied a second time during playback.
+
 ---
 
 ## Troubleshooting

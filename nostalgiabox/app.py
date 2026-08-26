@@ -192,6 +192,8 @@ class TVApp:
     def handle_event(self, event: InputEvent) -> None:
         action = event.action
 
+        print("Action received: ",  event)
+
         if action == Action.QUIT:
             self._running = False
             return

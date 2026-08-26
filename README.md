@@ -306,6 +306,10 @@ Validate any changes with `nostalgiabox --check`.
 
 ## Troubleshooting
 
+```bash
+source .venv/bin/activate && nostalgiabox --check
+```
+
 - **`--check` shows 0 episodes for a channel** → the `path` is wrong, or the
   files use an extension not in `video_extensions`.
 - **No video on the TV** → make sure the HDMI cable is in the right Pi port and

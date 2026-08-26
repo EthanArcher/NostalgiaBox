@@ -40,6 +40,7 @@ _IX0 = _FRAME_X0 + int(_FRAME_W * _SAFE)        # ~217  (left safe edge)
 _IX1 = _FRAME_X1 - int(_FRAME_W * _SAFE)        # ~1062 (right safe edge)
 _IY0 = int(CANVAS_H * _SAFE)                     # ~43   (top safe edge)
 _IY1 = CANVAS_H - int(CANVAS_H * _SAFE)          # ~677  (bottom safe edge)
+_CHANNEL_X = _IX1 - 64                           # shift channel OSD left slightly
 
 # Overlay slots (ids). Each kind of overlay owns one id so it can be replaced
 # or cleared independently.
@@ -165,10 +166,10 @@ def _channel_bug_ass(number: int, name: str, ui: UiConfig) -> str:
     """Green digital 'CH 03' + show name, flashed inside the top-right of the frame."""
     num = f"{number:02d}"
     number_line = (
-        rf"{{\an9\pos({_IX1},{_IY0}){_style(ui, size=88)}}}CH {num}"
+        rf"{{\an9\pos({_CHANNEL_X},{_IY0}){_style(ui, size=88)}}}CH {num}"
     )
     name_line = (
-        rf"{{\an9\pos({_IX1},{_IY0 + 104}){_channel_name_style(ui)}}}{_escape(name)}"
+        rf"{{\an9\pos({_CHANNEL_X},{_IY0 + 104}){_channel_name_style(ui)}}}{_escape(name)}"
     )
     return "\n".join([number_line, name_line])
 

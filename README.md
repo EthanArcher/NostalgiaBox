@@ -314,7 +314,8 @@ The tool preserves the folder structure, fills the fixed 4:3 frame, adds a
 subtle curve, vignette, and scanlines, and copies the original audio tracks.
 It never overwrites the originals. Point the channel paths in `config.yaml` at
 `/media/nostalgiabox-crt/<show>` and set `crt.enabled: false` so the effect is
-not applied a second time during playback.
+not applied a second time during playback. Add `--force` to regenerate baked
+copies after changing the encoding settings.
 
 ---
 

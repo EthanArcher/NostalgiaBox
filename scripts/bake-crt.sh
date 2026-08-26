@@ -2,9 +2,15 @@
 # Bake the NostalgiaBox CRT look into video copies.
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 INPUT_DIR OUTPUT_DIR" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "usage: $0 INPUT_DIR OUTPUT_DIR [--force]" >&2
   exit 2
+fi
+
+force=0
+if [[ $# -eq 3 ]]; then
+  [[ "$3" == "--force" ]] || { echo "error: unknown option: $3" >&2; exit 2; }
+  force=1
 fi
 
 input_dir="${1%/}"
@@ -34,17 +40,20 @@ find "$input_dir" -type f ! -name '._*' \( \
   target="$output_dir/${relative%.*}.mp4"
   mkdir -p "$(dirname "$target")"
 
-  if [[ -e "$target" ]]; then
+  if [[ -e "$target" && "$force" -eq 0 ]]; then
     echo "skip (already exists): $target"
     continue
   fi
 
   duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$source")"
   echo "processing: $relative"
-  ffmpeg -hide_banner -loglevel warning -nostdin -n \
+  overwrite="-n"
+  [[ "$force" -eq 1 ]] && overwrite="-y"
+  ffmpeg -hide_banner -loglevel warning -nostdin "$overwrite" \
     -i "$source" \
     -vf "scale=960:720:force_original_aspect_ratio=increase,crop=960:720:(iw-ow)/2:(ih-oh)/2,setsar=1,lenscorrection=k1=-0.08:k2=0.02,vignette=PI/5,drawgrid=w=iw:h=2:t=1:c=black@0.10" \
-    -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p \
+    -c:v libx264 -preset veryfast -crf 23 -maxrate 1500k -bufsize 3000k \
+    -profile:v high -level:v 3.1 -g 50 -bf 2 -pix_fmt yuv420p \
     -c:a copy -movflags +faststart -progress "$progress_file" "$target" &
   ffmpeg_pid=$!
   last_percent=-1

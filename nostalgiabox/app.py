@@ -109,15 +109,11 @@ class TVApp:
             if dry_run:
                 player = MockPlayer(verbose=True)
             else:
-                from .crt import write_shader
                 from .player import MpvPlayer
 
                 assets = assets_dir or config.assets_dir or DEFAULT_ASSETS_DIR
-                shader_path = write_shader(config.crt)
                 player = MpvPlayer(
-                    glsl_shaders=str(shader_path) if shader_path else None,
                     fonts_dir=assets / "fonts",
-                    force_4_3=config.force_4_3,
                     audio_device=config.audio_device,
                 )
 

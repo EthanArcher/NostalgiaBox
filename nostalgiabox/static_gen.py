@@ -44,7 +44,7 @@ def generate_static(
     out_path: Path,
     *,
     duration: float = 1.0,
-    width: int = 1280,
+    width: int = 960,
     height: int = 720,
     fps: int = 25,
 ) -> Path:
@@ -73,7 +73,7 @@ def generate_glitch(
     out_path: Path,
     *,
     duration: float = 0.6,
-    width: int = 1280,
+    width: int = 960,
     height: int = 720,
     fps: int = 25,
 ) -> Path:
@@ -81,8 +81,8 @@ def generate_glitch(
 
     Chunky coloured blocks (small random frame scaled up with nearest-neighbour)
     read as corrupted video macroblocks - a brief digital glitch shown while the
-    channel changes. Only a fraction is shown per change, but the CRT shader is
-    applied to it so it stays inside the tube frame.
+    channel changes. The source media is expected to already be styled before
+    playback, so this clip stays focused on the transition effect.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -105,7 +105,7 @@ def generate_color_bars(
     out_path: Path,
     *,
     duration: float = 6.0,
-    width: int = 1280,
+    width: int = 960,
     height: int = 720,
     fps: int = 25,
 ) -> Path:

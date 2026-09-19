@@ -27,10 +27,9 @@ from .player import Player
 CANVAS_W = 1280
 CANVAS_H = 720
 
-# The video is forced into a 4:3 frame centred on the 16:9 canvas (see
-# MpvPlayer.force_4_3). We lay the OSD out *inside* that 4:3 frame - with a small
-# safe-area inset so nothing sits under the CRT's rounded corners - so the green
-# readouts always sit over the picture, never out in the black pillarbox bars.
+# The media is already authored in a 4:3-safe frame, so the OSD sits inside that
+# fixed picture area with a small safe-area inset so the green readouts stay over
+# the content and never drift into the surrounding black bars.
 _FRAME_W = int(round(CANVAS_H * 4 / 3))        # 960
 _FRAME_X0 = (CANVAS_W - _FRAME_W) // 2          # 160
 _FRAME_X1 = _FRAME_X0 + _FRAME_W                # 1120

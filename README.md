@@ -285,9 +285,6 @@ audio_device: "..."      # force HDMI audio (see Part H)
 ui:                      # the green on-screen display
   color: "#4DFF5A"
   glow: true
-crt:                     # the CRT picture effect (curve, rounding, scanlines)
-  enabled: true
-  curvature: 0.12
 ```
 
 Leaving out episodes per channel:
@@ -301,21 +298,6 @@ Leaving out episodes per channel:
 ```
 
 Validate any changes with `nostalgiabox --check`.
-
-### Bake the CRT effect into video files
-
-If the Pi struggles with the live CRT shader, make processed copies with ffmpeg:
-
-```bash
-./scripts/bake-crt.sh /media/nostalgiabox /media/nostalgiabox-crt
-```
-
-The tool preserves the folder structure, fills the fixed 4:3 frame, adds a
-subtle curve, vignette, and scanlines, and copies the original audio tracks.
-It never overwrites the originals. Point the channel paths in `config.yaml` at
-`/media/nostalgiabox-crt/<show>` and set `crt.enabled: false` so the effect is
-not applied a second time during playback. Add `--force` to regenerate baked
-copies after changing the encoding settings.
 
 ---
 
@@ -359,7 +341,6 @@ nostalgiabox/
 ├── channel.py     folder scanning, tune-in modes, channel navigation
 ├── player.py      mpv player (+ a mock for tests)
 ├── overlay.py     the green on-screen display
-├── crt.py         the CRT shader
 ├── input/         remote input (Flirc/keyboard, HDMI-CEC, keymap)
 ├── static_gen.py  ffmpeg-generated static/glitch/colour-bar clips
 └── app.py         the TV state machine

@@ -101,13 +101,13 @@ def test_video_extensions_normalised(tmp_path):
     assert cfg.video_extensions == (".mp4", ".mkv")
 
 
-def test_ui_and_crt_defaults(tmp_path):
+def test_ui_defaults_and_no_runtime_frame_config(tmp_path):
     make_show(tmp_path, "a", 1)
     cfg = config_from_dict({"channels": [{"path": str(tmp_path / "a")}]})
     assert cfg.ui.font == "VT323"
     assert cfg.ui.color == "#4DFF5A"
-    assert cfg.crt.enabled is True
-    assert cfg.force_4_3 is False   # shows keep their native aspect by default
+    assert not hasattr(cfg, "crt")
+    assert not hasattr(cfg, "force_4_3")
     assert cfg.start_offset_min == 6.0
     assert cfg.start_offset_max == 10.0
     assert cfg.transition_effect == "none"
@@ -129,33 +129,17 @@ def test_start_offset_forms(tmp_path):
     assert (c3.start_offset_min, c3.start_offset_max) == (10.0, 10.0)
 
 
-def test_ui_and_crt_overrides(tmp_path):
+def test_ui_overrides(tmp_path):
     make_show(tmp_path, "a", 1)
     cfg = config_from_dict(
         {
             "channels": [{"path": str(tmp_path / "a")}],
             "ui": {"font": "Press Start 2P", "color": "00FF00", "glow": False},
-            "crt": {"enabled": False, "curvature": 0.2, "scanlines": False},
         }
     )
     assert cfg.ui.font == "Press Start 2P"
     assert cfg.ui.color == "#00FF00"  # normalised with leading '#'
     assert cfg.ui.glow is False
-    assert cfg.crt.enabled is False
-    assert cfg.crt.curvature == 0.2
-    assert cfg.crt.scanlines is False
-
-
-def test_crt_values_clamped(tmp_path):
-    make_show(tmp_path, "a", 1)
-    cfg = config_from_dict(
-        {
-            "channels": [{"path": str(tmp_path / "a")}],
-            "crt": {"curvature": 5.0, "vignette": -1},
-        }
-    )
-    assert cfg.crt.curvature == 0.5   # clamped to max
-    assert cfg.crt.vignette == 0.0    # clamped to min
 
 
 def test_bad_transition_rejected(tmp_path):

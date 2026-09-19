@@ -110,9 +110,7 @@ class MpvPlayer(Player):
         *,
         fullscreen: bool = True,
         hwdec: str = "auto-safe",
-        glsl_shaders: Optional[str] = None,
         fonts_dir: Optional[Path] = None,
-        force_4_3: bool = True,
         audio_device: Optional[str] = None,
         extra_options: Optional[dict] = None,
     ) -> None:
@@ -173,19 +171,6 @@ class MpvPlayer(Player):
             # Force audio to a specific output (e.g. HDMI) instead of mpv's
             # default (which can pick the 3.5mm jack on a Raspberry Pi).
             options["audio_device"] = audio_device
-        if glsl_shaders:
-            # CRT curvature/rounding/vignette/scanlines. Applied globally (always
-            # on) so a newly-loaded episode is never shown for a frame or two
-            # without the effect on a channel change.
-            options["glsl_shaders"] = glsl_shaders
-        if force_4_3:
-            # Fill a common 4:3 raster without stretching: scale up until the
-            # frame is covered, then crop excess edges. mpv then pillarboxes
-            # that 4:3 image on a 16:9 TV, and the CRT shader curves it.
-            options["vf"] = (
-                "lavfi=[scale=960:720:force_original_aspect_ratio=increase,"
-                "crop=960:720:(iw-ow)/2:(ih-oh)/2,setsar=1]"
-            )
         if extra_options:
             options.update(extra_options)
 

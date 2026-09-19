@@ -54,18 +54,6 @@ class UiConfig:
 
 
 @dataclass(frozen=True)
-class CrtConfig:
-    """The CRT picture effect applied to the 4:3 video via a GLSL shader."""
-
-    enabled: bool = True
-    curvature: float = 0.12         # barrel "bulge" amount (0 = perfectly flat)
-    corner_radius: float = 0.065    # rounded-corner size (fraction of screen)
-    vignette: float = 0.25          # darkening toward the edges
-    scanlines: bool = True
-    scanline_intensity: float = 0.12
-
-
-@dataclass(frozen=True)
 class ChannelConfig:
     """A single television channel backed by a folder of episodes."""
 
@@ -96,8 +84,6 @@ class Config:
     start_channel: Optional[int] = None
 
     # Presentation / "feel" of the TV.
-    force_4_3: bool = False                # if true, letterbox everything to 4:3;
-                                          #   default keeps each show's own aspect
     # Start each episode a random number of seconds in (between min and max), so
     # channel switches land at varied points in the show.
     start_offset_min: float = 6.0
@@ -111,7 +97,6 @@ class Config:
     channel_bug_seconds: float = 4.0      # how long the channel banner lingers
     osd_duration: float = 2.0             # how long volume/message overlays linger
     ui: UiConfig = field(default_factory=UiConfig)
-    crt: CrtConfig = field(default_factory=CrtConfig)
 
     # Audio.
     initial_volume: int = 70              # 0-100
@@ -310,7 +295,6 @@ def config_from_dict(data: Dict[str, Any], *, base_dir: Optional[Path] = None) -
         video_extensions=extensions,
         tune_in=tune_in,
         start_channel=start_channel,
-        force_4_3=bool(data.get("force_4_3", False)),
         start_offset_min=_offset_range(data)[0],
         start_offset_max=_offset_range(data)[1],
         transition_effect=_valid_transition(data.get("transition", "none")),
@@ -319,7 +303,6 @@ def config_from_dict(data: Dict[str, Any], *, base_dir: Optional[Path] = None) -
         channel_bug_seconds=_clamp_float(data.get("channel_bug_seconds", 4.0), 0.0, 60.0, "channel_bug_seconds"),
         osd_duration=_clamp_float(data.get("osd_duration", 2.0), 0.0, 60.0, "osd_duration"),
         ui=_parse_ui(data.get("ui")),
-        crt=_parse_crt(data.get("crt")),
         initial_volume=initial_volume,
         volume_step=volume_step,
         audio_device=audio_device,
@@ -361,23 +344,6 @@ def _parse_ui(raw: Any) -> UiConfig:
         glow=bool(raw.get("glow", defaults.glow)),
     )
 
-
-def _parse_crt(raw: Any) -> CrtConfig:
-    if raw is None:
-        return CrtConfig()
-    if not isinstance(raw, dict):
-        raise ConfigError("'crt' must be a mapping")
-    d = CrtConfig()
-    return CrtConfig(
-        enabled=bool(raw.get("enabled", d.enabled)),
-        curvature=_clamp_float(raw.get("curvature", d.curvature), 0.0, 0.5, "crt.curvature"),
-        corner_radius=_clamp_float(raw.get("corner_radius", d.corner_radius), 0.0, 0.3, "crt.corner_radius"),
-        vignette=_clamp_float(raw.get("vignette", d.vignette), 0.0, 1.0, "crt.vignette"),
-        scanlines=bool(raw.get("scanlines", d.scanlines)),
-        scanline_intensity=_clamp_float(
-            raw.get("scanline_intensity", d.scanline_intensity), 0.0, 1.0, "crt.scanline_intensity"
-        ),
-    )
 
 
 def _offset_range(data: Dict[str, Any]) -> tuple[float, float]:
@@ -449,7 +415,6 @@ __all__ = [
     "Config",
     "ChannelConfig",
     "UiConfig",
-    "CrtConfig",
     "ConfigError",
     "load_config",
     "config_from_dict",

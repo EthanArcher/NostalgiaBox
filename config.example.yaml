@@ -66,10 +66,8 @@ tune_in: random
 start_channel: 2          # which channel the box powers on to
 
 # --- The "feel" of the TV ----------------------------------------------------
-# Shows keep their own aspect ratio (4:3 is pillar-boxed, 16:9 fills the screen)
-# and get the CRT curve/rounding. Set force_4_3:true to instead letterbox every
-# show into a single 4:3 frame.
-force_4_3: false
+# Shows are already baked with their final framing, so the player does not need
+# to force any additional aspect-ratio processing at runtime.
 
 # Start each episode a random number of seconds in, between these two values, so
 # channel switches land at varied points in the show (skips the black leader/
@@ -94,17 +92,6 @@ ui:
   color: "#4DFF5A"        # phosphor green for CH banner, volume bar, messages
   dim_color: "#123B18"    # (reserved) colour for unlit elements
   glow: true              # soft CRT-style glow around the text
-
-# --- CRT picture effect (for 4:3 shows on a flat TV) -------------------------
-# Bends the picture like a tube TV: a gentle bulge, rounded corners, a vignette
-# and faint scanlines. Set enabled:false if your Pi struggles or you dislike it.
-crt:
-  enabled: true
-  curvature: 0.12         # 0 = flat, ~0.2 = strongly bulged
-  corner_radius: 0.065    # how rounded the corners are
-  vignette: 0.25          # edge darkening (0-1)
-  scanlines: true
-  scanline_intensity: 0.12
 
 # --- Audio -------------------------------------------------------------------
 initial_volume: 70        # 0-100

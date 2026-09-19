@@ -109,7 +109,7 @@ class MpvPlayer(Player):
         self,
         *,
         fullscreen: bool = True,
-        hwdec: str = "auto-safe",
+        hwdec: str = "no",
         fonts_dir: Optional[Path] = None,
         audio_device: Optional[str] = None,
         extra_options: Optional[dict] = None,
@@ -158,6 +158,7 @@ class MpvPlayer(Player):
             hwdec=hwdec,
             vo="gpu",
             gpu_context="drm",
+            profile="fast",
             # Keep the output frame stable and let the filter below decide how
             # source aspect ratios are fitted into it.
             keepaspect="yes",
